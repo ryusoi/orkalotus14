@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email_verified == true && request.auth.token.email == 'marmarisluxuryvillas@gmail.com')
+      );
+    }
+
+    function isValidRating(data) {
+      return data.targetId is string && isValidId(data.targetId) &&
+        data.targetType in ['service', 'management', 'staff'] &&
+        data.overallRating is number && data.overallRating >= 1 && data.overallRating <= 5 &&
+        data.hospitalityRating is number && data.hospitalityRating >= 1 && data.hospitalityRating <= 5 &&
+        data.professionalismRating is number && data.professionalismRating >= 1 && data.professionalismRating <= 5 &&
+        data.helpfulnessRating is number && data.helpfulnessRating >= 1 && data.helpfulnessRating <= 5 &&
+        data.courtesyRating is number && data.courtesyRating >= 1 && data.courtesyRating <= 5 &&
+        data.qualityRating is number && data.qualityRating >= 1 && data.qualityRating <= 5 &&
+        data.recommendation in ['absolutely', 'yes', 'maybe', 'probably_not'] &&
+        data.submissionSessionId is string && data.submissionSessionId.size() <= 128 &&
+        (!('comment' in data) || (data.comment is string && data.comment.size() <= 500)) &&
+        (!('guestDisplayName' in data) || (data.guestDisplayName is string && data.guestDisplayName.size() <= 100)) &&
+        (!('anonymous' in data) || data.anonymous is bool);
+    }
+
+    // Categories: Publicly readable when active; writeable by administrator
+    match /categories/{categoryId} {
+      allow read: if isValidId(categoryId);
+      allow write: if isAdmin();
+    }
+
+    // People (Management & Staff): Publicly readable; writeable by administrator
+    match /people/{personId} {
+      allow read: if isValidId(personId);
+      allow write: if isAdmin();
+    }
+
+    // Ratings: Public submissions allowed under strict schema constraints; immutable once written
+    match /ratings/{ratingId} {
+      allow read: if isValidId(ratingId);
+      allow create: if isValidId(ratingId) && isValidRating(incoming());
+      allow update, delete: if isAdmin(); // Guests can NEVER update or delete submitted ratings
+    }
+
+    // Rating Summaries: Publicly readable for fast free-first aggregate views
+    match /ratingSummaries/{targetId} {
+      allow read: if isValidId(targetId);
+      allow write: if isAdmin() || (
+        // Allow client to update aggregate safely if validated
+        incoming().targetId is string && isValidId(incoming().targetId) &&
+        incoming().totalRatings is number && incoming().totalRatings >= 1 &&
+        incoming().averageOverall is number && incoming().averageOverall >= 1 && incoming().averageOverall <= 5
+      );
+    }
+
+    // Admins registry collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Provisioned via Firebase Console or Admin SDK
+    }
+  }
+}

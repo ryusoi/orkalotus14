@@ -1,0 +1,10 @@
+{
+  "name": "ORKA LOTUS BEACH Guest Guide",
+  "short_name": "Orka Lotus",
+  "description": "Your pocket guide to ORKA LOTUS BEACH in Marmaris.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f5ed",
+  "theme_color": "#123e55",
+  "lang": "en"
+}

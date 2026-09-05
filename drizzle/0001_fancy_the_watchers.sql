@@ -1,0 +1,1 @@
+ALTER TABLE `guestAssets` ADD `published` boolean DEFAULT false NOT NULL;

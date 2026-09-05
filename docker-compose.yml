@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - JWT_SECRET=change_me_to_a_secure_random_string_32_chars_long
+      - STORAGE_PROVIDER=local
+      - STORAGE_LOCAL_DIR=uploads
+      - DATABASE_URL=mysql://orka:orkapassword@db:3306/orkalotus
+    volumes:
+      - app_uploads:/app/uploads
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: orkalotus
+      MYSQL_USER: orka
+      MYSQL_PASSWORD: orkapassword
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  app_uploads:
+  db_data:

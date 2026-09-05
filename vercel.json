@@ -1,0 +1,27 @@
+{
+  "framework": "vite",
+  "buildCommand": "vite build",
+  "outputDirectory": "dist/public",
+  "rewrites": [
+    {
+      "source": "/api/rating-notification",
+      "destination": "/api/rating-notification"
+    },
+    {
+      "source": "/api/ratings/notify",
+      "destination": "/api/rating-notification"
+    },
+    {
+      "source": "/api/notify-rating",
+      "destination": "/api/rating-notification"
+    },
+    {
+      "source": "/api/:match*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
