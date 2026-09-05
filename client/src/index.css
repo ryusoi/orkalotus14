@@ -3374,6 +3374,34 @@ button, a { -webkit-tap-highlight-color: transparent; }
   margin: 16px 0;
 }
 
+@keyframes goldWordShine {
+  0%, 100% {
+    color: #e5c158;
+    filter: drop-shadow(0 0 3px rgba(212, 175, 55, 0.5));
+    transform: translateY(0) scale(1);
+    opacity: 0.92;
+  }
+  35%, 65% {
+    color: #ffffff;
+    filter: drop-shadow(0 0 14px rgba(254, 240, 138, 1)) drop-shadow(0 0 26px rgba(251, 191, 36, 0.95)) drop-shadow(0 0 38px rgba(212, 175, 55, 0.85));
+    transform: translateY(-2px) scale(1.09);
+    opacity: 1;
+  }
+  50% {
+    color: #fffbeb;
+    filter: drop-shadow(0 0 18px rgba(255, 255, 255, 1)) drop-shadow(0 0 32px rgba(254, 240, 138, 1)) drop-shadow(0 0 45px rgba(251, 191, 36, 0.9));
+    transform: translateY(-3px) scale(1.12);
+    opacity: 1;
+  }
+}
+
+.animate-gold-word {
+  display: inline-block;
+  animation: goldWordShine 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform, filter, color;
+}
+
+
 
 
 

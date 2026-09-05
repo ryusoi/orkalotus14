@@ -237,6 +237,7 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
         rating.nameOrRoomNumber ||
         rating.guestNameOrRoom ||
         rating.guestDisplayName ||
+        rating.displayName ||
         ""
       ).trim();
 
@@ -251,7 +252,7 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
       }
 
       // Check if room number is contained in rawGuestInput, guestName, or rating.room
-      const textToSearch = [rawGuestInput, guestName, rating.room || ""].filter(Boolean).join(" ");
+      const textToSearch = [rawGuestInput, guestName, rating.room || "", rating.roomNumber || ""].filter(Boolean).join(" ");
       if (!roomNumber && textToSearch) {
         const keywordMatch = textToSearch.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i);
         const numberMatch = textToSearch.match(/\b([0-9]{1,5}[a-zA-Z]?|[a-zA-Z][0-9]{1,4})\b/);
@@ -284,13 +285,21 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
       const hasRoom = Boolean(roomNumber && roomNumber !== "Not specified" && roomNumber !== "Not provided");
       const hasName = Boolean(guestName && guestName !== "Verified Guest" && guestName !== "Anonymous Guest" && !guestName.startsWith("Verified Guest (Room"));
       const roomNumberFormatted = hasRoom ? `Room ${roomNumber}` : "Not specified";
-      const guestNameDisplay = guestName || (hasRoom ? `Verified Guest (${roomNumberFormatted})` : "Verified Guest");
-      const fullGuestNameWithRoom = hasRoom && hasName ? `${guestName} (${roomNumberFormatted})` : (hasRoom ? roomNumberFormatted : guestNameDisplay);
+      const cleanGuestName = hasName ? guestName : "Verified Guest";
+      const guestNameDisplay = cleanGuestName;
 
-      // First stars for main rating
-      const firstStars =
-        "★".repeat(Math.min(5, Math.max(1, Math.round(overall)))) +
-        "☆".repeat(Math.max(0, 5 - Math.min(5, Math.max(1, Math.round(overall)))));
+      // Clean single-line identity without duplicate repetitive labels
+      const fullDisplayIdentity = hasRoom && hasName
+        ? `${cleanGuestName} (${roomNumberFormatted})`
+        : (hasRoom ? roomNumberFormatted : cleanGuestName);
+
+      const fullGuestNameWithRoom = fullDisplayIdentity;
+
+      // First stars breakdown: filled vs unfilled stars
+      const overallFilled = Math.min(5, Math.max(1, Math.round(overall)));
+      const overallUnfilled = 5 - overallFilled;
+      const firstStars = "★".repeat(overallFilled) + "☆".repeat(overallUnfilled);
+      const overallStarsStatus = `${overallFilled} of 5 Stars Filled${overallUnfilled > 0 ? ` (${overallUnfilled} Unfilled)` : " (Full 5/5 Score)"}`;
 
       const formattedDate = rating.createdAt
         ? new Date(rating.createdAt).toLocaleString("en-GB", {
@@ -304,7 +313,13 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
           }) + " (Marmaris, TR)"
         : nowIso;
 
-      const subject = `[ORKA LOTUS] New Guest Ranking: ${targetName} • Overall ${overall.toFixed(1)}/5.0 ★`;
+      const roomSubjectSnippet = hasRoom
+        ? ` • ${roomNumberFormatted}`
+        : "";
+      const nameSubjectSnippet = hasName
+        ? ` (${cleanGuestName})`
+        : "";
+      const subject = `[ORKA LOTUS] New Guest Ranking: ${targetName} • Overall ${overall.toFixed(1)}/5.0 ★${roomSubjectSnippet}${nameSubjectSnippet}`;
 
       // Secondary stars for detailed culinary & services dimensions
       const hasDetailed = Boolean(
@@ -317,7 +332,7 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
         (rating.qualityRating && rating.qualityRating !== overall)
       );
 
-        const hospScore = Number(rating.hospitalityRating ?? rating.hospitality ?? overall);
+      const hospScore = Number(rating.hospitalityRating ?? rating.hospitality ?? overall);
       const profScore = Number(rating.professionalismRating ?? rating.professionalism ?? overall);
       const helpScore = Number(rating.helpfulnessRating ?? rating.helpfulness ?? overall);
       const courtScore = Number(rating.courtesyRating ?? rating.courtesy ?? overall);
@@ -328,19 +343,45 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
         return "★".repeat(rounded) + "☆".repeat(Math.max(0, 5 - rounded));
       };
 
-      const renderHtmlStarScore = (score: number) => {
+      const renderHtmlStarScore = (score: number, size = 22) => {
         const rounded = Math.min(5, Math.max(1, Math.round(score)));
-        const filled = "★ ".repeat(rounded).trim();
-        const empty = rounded < 5 ? " ☆".repeat(5 - rounded) : "";
-        return `<span style="color: #fbbf24; font-size: 22px; letter-spacing: 4px; text-shadow: 0 0 10px rgba(251,191,36,0.6);">${filled}</span>${empty ? `<span style="color: #475569; font-size: 22px; letter-spacing: 4px;">${empty}</span>` : ""}`;
+        const filled = rounded;
+        const unfilled = 5 - rounded;
+        let html = "";
+        for (let i = 0; i < filled; i++) {
+          html += `<span style="color: #fbbf24; font-size: ${size}px; margin-right: 3px; text-shadow: 0 0 10px rgba(251,191,36,0.7);">★</span>`;
+        }
+        for (let i = 0; i < unfilled; i++) {
+          html += `<span style="color: #64748b; font-size: ${size}px; margin-right: 3px;">☆</span>`;
+        }
+        return html;
+      };
+
+      const renderPrimaryHtmlStars = (score: number) => {
+        const rounded = Math.min(5, Math.max(1, Math.round(score)));
+        const filled = rounded;
+        const unfilled = 5 - rounded;
+        let html = "";
+        for (let i = 0; i < filled; i++) {
+          html += `<span style="color: #fbbf24; font-size: 32px; margin: 0 3px; text-shadow: 0 0 14px rgba(251,191,36,0.8);">★</span>`;
+        }
+        for (let i = 0; i < unfilled; i++) {
+          html += `<span style="color: #64748b; font-size: 32px; margin: 0 3px;">☆</span>`;
+        }
+        return html;
       };
 
       const renderTextStarScore = (score: number) => {
         const rounded = Math.min(5, Math.max(1, Math.round(score)));
-        return "⭐ ".repeat(rounded).trim();
+        const filled = rounded;
+        const unfilled = 5 - rounded;
+        return "★".repeat(filled) + "☆".repeat(unfilled);
       };
 
-      const renderEmojiStars = renderTextStarScore;
+      const renderEmojiStars = (score: number) => {
+        const rounded = Math.min(5, Math.max(1, Math.round(score)));
+        return "★".repeat(rounded) + "☆".repeat(5 - rounded);
+      };
 
       const getScoreLabel = (score: number) => {
         if (score >= 4.75) return "Exceptional";
@@ -350,11 +391,23 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
         return "Poor / Urgent Review";
       };
 
-      const hospStars = rating.hospitalityStars || renderStarHelper(hospScore);
-      const profStars = rating.professionalismStars || renderStarHelper(profScore);
-      const helpStars = rating.helpfulnessStars || renderStarHelper(helpScore);
-      const courtStars = rating.courtesyStars || renderStarHelper(courtScore);
-      const qualStars = rating.qualityStars || renderStarHelper(qualScore);
+      const getStarDetailText = (score: number) => {
+        const filled = Math.min(5, Math.max(1, Math.round(score)));
+        const unfilled = 5 - filled;
+        return `${filled} of 5 Stars Filled${unfilled > 0 ? ` • ${unfilled} Unfilled` : " • Full Score"}`;
+      };
+
+      const hospFilled = Math.min(5, Math.max(1, Math.round(hospScore)));
+      const profFilled = Math.min(5, Math.max(1, Math.round(profScore)));
+      const helpFilled = Math.min(5, Math.max(1, Math.round(helpScore)));
+      const courtFilled = Math.min(5, Math.max(1, Math.round(courtScore)));
+      const qualFilled = Math.min(5, Math.max(1, Math.round(qualScore)));
+
+      const hospStars = renderStarHelper(hospScore);
+      const profStars = renderStarHelper(profScore);
+      const helpStars = renderStarHelper(helpScore);
+      const courtStars = renderStarHelper(courtScore);
+      const qualStars = renderStarHelper(qualScore);
 
       const isCulinary =
         categoryName === "Food & Beverage" ||
@@ -388,9 +441,12 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
           name: "Overall Guest Experience",
           subtitle: "General satisfaction and Aegean resort experience",
           score: overall,
+          filledCount: overallFilled,
+          unfilledCount: overallUnfilled,
           starsHtml: renderHtmlStarScore(overall),
           starsText: renderTextStarScore(overall),
-          starsPlain: renderStarHelper(overall),
+          starsPlain: firstStars,
+          starsLabel: getStarDetailText(overall),
           label: getScoreLabel(overall),
         },
         {
@@ -399,9 +455,12 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
           name: "Hospitality & Warmth",
           subtitle: "Friendliness, welcoming demeanor & guest care",
           score: hospScore,
+          filledCount: hospFilled,
+          unfilledCount: 5 - hospFilled,
           starsHtml: renderHtmlStarScore(hospScore),
           starsText: renderTextStarScore(hospScore),
-          starsPlain: renderStarHelper(hospScore),
+          starsPlain: hospStars,
+          starsLabel: getStarDetailText(hospScore),
           label: getScoreLabel(hospScore),
         },
         {
@@ -410,9 +469,12 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
           name: "Professionalism & Competence",
           subtitle: "Expertise, demeanor & attentiveness",
           score: profScore,
+          filledCount: profFilled,
+          unfilledCount: 5 - profFilled,
           starsHtml: renderHtmlStarScore(profScore),
           starsText: renderTextStarScore(profScore),
-          starsPlain: renderStarHelper(profScore),
+          starsPlain: profStars,
+          starsLabel: getStarDetailText(profScore),
           label: getScoreLabel(profScore),
         },
         {
@@ -421,9 +483,12 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
           name: "Helpfulness & Speed",
           subtitle: "Efficiency, responsiveness & prompt service",
           score: helpScore,
+          filledCount: helpFilled,
+          unfilledCount: 5 - helpFilled,
           starsHtml: renderHtmlStarScore(helpScore),
           starsText: renderTextStarScore(helpScore),
-          starsPlain: renderStarHelper(helpScore),
+          starsPlain: helpStars,
+          starsLabel: getStarDetailText(helpScore),
           label: getScoreLabel(helpScore),
         },
         {
@@ -432,9 +497,12 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
           name: "Courtesy & Respect",
           subtitle: "Politeness, dignity & considerate approach",
           score: courtScore,
+          filledCount: courtFilled,
+          unfilledCount: 5 - courtFilled,
           starsHtml: renderHtmlStarScore(courtScore),
           starsText: renderTextStarScore(courtScore),
-          starsPlain: renderStarHelper(courtScore),
+          starsPlain: courtStars,
+          starsLabel: getStarDetailText(courtScore),
           label: getScoreLabel(courtScore),
         },
         {
@@ -445,15 +513,18 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
             ? "Culinary excellence, beverage craft & fresh buffet presentation"
             : "Precision, operational execution & quality assurance",
           score: qualScore,
+          filledCount: qualFilled,
+          unfilledCount: 5 - qualFilled,
           starsHtml: renderHtmlStarScore(qualScore),
           starsText: renderTextStarScore(qualScore),
-          starsPlain: renderStarHelper(qualScore),
+          starsPlain: qualStars,
+          starsLabel: getStarDetailText(qualScore),
           label: getScoreLabel(qualScore),
         },
       ];
 
       const secondaryStarsSummary = dimensionList
-        .map((dim) => `${dim.name}: ${dim.starsPlain} (${dim.score.toFixed(1)}/5.0)`)
+        .map((dim) => `${dim.name}: ${dim.starsPlain} (${dim.starsLabel})`)
         .join(" • ");
 
       const detailedDimensionsBlock = [
@@ -467,7 +538,7 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
           (dim) =>
             `${dim.num}. ${dim.name.toUpperCase()}\n` +
             `   Score: ${dim.score.toFixed(1)} / 5.0 — ${dim.label}\n` +
-            `   Stars: ${dim.starsText} (${dim.starsPlain})\n` +
+            `   Stars: ${dim.starsPlain} (${dim.starsLabel})\n` +
             `   --------------------------------------------------`
         ),
       ].join("\n");
@@ -485,12 +556,12 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
         ? rawUserComment.split("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")[0].trim()
         : rawUserComment;
 
+      // Clean single guest identification header without duplicate repetitive lines
       const guestHeaderBlock = [
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         "👤 GUEST & STAY IDENTIFICATION:",
-        `• Box Filled (Name / Room): ${rawGuestInput || "Verified Guest"}`,
+        `• Guest Name: ${cleanGuestName}`,
         `• Room Number: ${roomNumberFormatted}`,
-        `• Guest Name: ${guestNameDisplay}`,
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
       ].join("\n");
 
@@ -554,8 +625,11 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
                 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #142a3f;">
                   <tr>
                     <td align="left" style="vertical-align: middle;">
-                      <div style="font-size: 22px; line-height: 1; letter-spacing: 4px;">
+                      <div style="line-height: 1;">
                         ${dim.starsHtml}
+                      </div>
+                      <div style="margin-top: 5px; font-size: 11px; font-weight: 700; color: #cbd5e1; letter-spacing: 0.3px;">
+                        ${dim.filledCount} of 5 Stars Filled ${dim.unfilledCount > 0 ? `<span style="color: #94a3b8; font-weight: 500;">(${dim.unfilledCount} Unfilled)</span>` : `<span style="color: #34d399; font-weight: 700;">(Full Score)</span>`}
                       </div>
                     </td>
                     <td align="right" style="vertical-align: middle; white-space: nowrap;">
@@ -644,16 +718,19 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
           <!-- SECTION 1: PRIMARY OVERALL GUEST RATING (Matching Website Step 1) -->
           <tr>
             <td style="padding: 24px; text-align: center; background: radial-gradient(circle at center, #132a42 0%, #081523 75%); border-bottom: 1px solid #142a3f;">
-              <div style="display: inline-block; padding: 16px 32px; background: linear-gradient(135deg, #11293e, #0b1c2b); border: 2px solid #d4af37; border-radius: 16px; box-shadow: 0 6px 24px rgba(212,175,55,0.3);">
+              <div style="display: inline-block; padding: 18px 36px; background: linear-gradient(135deg, #11293e, #0b1c2b); border: 2px solid #d4af37; border-radius: 16px; box-shadow: 0 6px 24px rgba(212,175,55,0.3);">
                 <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; color: #fef08a;">
                   PRIMARY OVERALL GUEST RATING
                 </p>
                 <div style="font-size: 46px; font-weight: 900; line-height: 1; color: #ffffff; font-family: Georgia, serif; text-shadow: 0 2px 10px rgba(0,0,0,0.6);">
                   ${overall.toFixed(1)} <span style="font-size: 20px; color: #d4af37; font-weight: 700;">/ 5.0</span>
                 </div>
-                <!-- Following line: Large prominent first stars -->
-                <div style="margin-top: 10px; font-size: 28px; color: #fbbf24; letter-spacing: 6px; text-shadow: 0 0 14px rgba(251,191,36,0.7); line-height: 1;">
-                  ${firstStars}
+                <!-- Prominent visual stars clearly distinguishing filled from unfilled -->
+                <div style="margin-top: 12px; line-height: 1;">
+                  ${renderPrimaryHtmlStars(overall)}
+                </div>
+                <div style="margin-top: 8px; font-size: 13px; font-weight: 800; color: #cbd5e1; letter-spacing: 0.3px;">
+                  ${overallStarsStatus}
                 </div>
                 <div style="margin-top: 10px;">
                   <span style="display: inline-block; padding: 4px 14px; background: linear-gradient(90deg, #d4af37, #fef08a, #d4af37); color: #040e17; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; border-radius: 9999px;">
@@ -681,38 +758,28 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
           <!-- SECTION 3: GUEST & STAY DETAILS -->
           <tr>
             <td style="padding: 20px 24px 16px 24px;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1.5px solid #1c354d; border-radius: 14px; overflow: hidden;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1.5px solid #d4af37; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 18px rgba(0,0,0,0.5);">
                 <tr>
-                  <td colspan="2" style="padding: 12px 18px; background: linear-gradient(135deg, #10263c, #0b1a29); border-bottom: 1px solid #1c354d; font-size: 11px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
-                    GUEST & SUBMISSION DETAILS
+                  <td colspan="2" style="padding: 12px 18px; background: linear-gradient(135deg, #10263c, #0b1a29); border-bottom: 1.5px solid #d4af37; font-size: 11px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
+                    👤 GUEST & STAY IDENTIFICATION
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 18px; font-size: 12px; color: #94a3b8; width: 38%; border-bottom: 1px solid #142a3f;">
-                    Name / Room Box Filled:
-                  </td>
-                  <td style="padding: 12px 18px; font-size: 13px; font-weight: 800; border-bottom: 1px solid #142a3f;">
-                    ${rawGuestInput
-                      ? `<span style="display: inline-block; padding: 4px 12px; background-color: rgba(254, 240, 138, 0.15); border: 1.5px solid #d4af37; border-radius: 8px; color: #fef08a; font-size: 13px; font-weight: 800; letter-spacing: 0.3px;">${rawGuestInput}</span>`
-                      : `<span style="color: #94a3b8; font-style: italic;">Not provided (Anonymous / Verified Guest)</span>`}
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 12px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">
-                    Room Number:
-                  </td>
-                  <td style="padding: 12px 18px; font-size: 13px; font-weight: 800; border-bottom: 1px solid #142a3f;">
-                    ${hasRoom
-                      ? `<span style="display: inline-block; padding: 4px 12px; background-color: rgba(52, 211, 153, 0.15); border: 1.5px solid #059669; border-radius: 8px; color: #34d399; font-size: 13px; font-weight: 800; letter-spacing: 0.5px;">✓ ${roomNumberFormatted}</span>`
-                      : `<span style="color: #94a3b8; font-style: italic;">Not specified</span>`}
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 12px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">
+                  <td style="padding: 12px 18px; font-size: 13px; color: #cbd5e1; width: 35%; border-bottom: 1px solid #142a3f; font-weight: 700;">
                     Guest Name:
                   </td>
-                  <td style="padding: 12px 18px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">
-                    ${guestNameDisplay}
+                  <td style="padding: 12px 18px; font-size: 14px; font-weight: 800; color: #ffffff; border-bottom: 1px solid #142a3f;">
+                    ${cleanGuestName}
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 18px; font-size: 13px; color: #cbd5e1; border-bottom: 1px solid #142a3f; font-weight: 700;">
+                    Room Number:
+                  </td>
+                  <td style="padding: 12px 18px; font-size: 14px; font-weight: 800; border-bottom: 1px solid #142a3f;">
+                    ${hasRoom
+                      ? `<span style="display: inline-block; padding: 4px 12px; background-color: rgba(52, 211, 153, 0.2); border: 1.5px solid #059669; border-radius: 8px; color: #34d399; font-size: 13px; font-weight: 800; letter-spacing: 0.5px;">✓ ${roomNumberFormatted}</span>`
+                      : `<span style="color: #94a3b8; font-style: italic;">Not specified</span>`}
                   </td>
                 </tr>
                 <tr>
@@ -740,7 +807,7 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
                   ⭐ DETAILED EXPERIENCE & SERVICE DIMENSIONS
                 </div>
                 <div style="font-size: 11px; color: #94a3b8; margin-top: 3px;">
-                  Listed section by section with visual star rating and score criteria (similar to website experience drawer)
+                  Listed section by section with visual star rating showing filled and unfilled stars
                 </div>
               </div>
 
@@ -809,7 +876,7 @@ Experience: ${defaultExperienceDesc}
 1. PRIMARY GUEST RATING
 -----------------------------------------------------
 Overall Score: ${overall.toFixed(1)} / 5.0 — ${getScoreLabel(overall)}
-Stars: ${firstStars} (★★★★★)
+Stars: ${firstStars} (${overallStarsStatus})
 
 2. RECOMMENDATION STATUS
 -----------------------------------------------------
@@ -817,23 +884,22 @@ Recommendation: ${getRecLabel(recommendation)}
 
 3. GUEST & SUBMISSION DETAILS
 -----------------------------------------------------
-"Your Name or Room Number" Box: ${rawGuestInput || "Not provided (Verified Guest)"}
+Guest Name: ${cleanGuestName}
 Room Number: ${roomNumberFormatted}
-Guest Name: ${guestNameDisplay}
 Submission Time: ${formattedDate}
 Rating ID: ${ratingId}
 Audit Status: Verified Guest Evaluation
 
 4. DETAILED EXPERIENCE & SERVICE RATINGS
 -----------------------------------------------------
-(Listed section by section with visual star rating and score)
+(Listed section by section with visual star rating showing filled and unfilled stars)
 
 ${dimensionList
   .map(
     (dim) =>
       `${dim.num}. ${dim.name.toUpperCase()}\n` +
       `   Score: ${dim.score.toFixed(1)} / 5.0 — ${dim.label}\n` +
-      `   Stars: ${dim.starsText} (${dim.starsPlain})\n` +
+      `   Stars: ${dim.starsPlain} (${dim.starsLabel})\n` +
       `   --------------------------------------------------`
   )
   .join("\n\n")}
@@ -861,19 +927,28 @@ Orka Lotus Beach Hotel Executive Quality Assurance Directorate
         compliments: formattedCommentForAppsScript,
         rawComment: cleanRawUserComment || "No written feedback provided.",
         userComment: cleanRawUserComment || "No written feedback provided.",
-        // Explicit guest identity fields
-        guestName: fullGuestNameWithRoom,
-        roomNumber: roomNumberFormatted,
+        // Clean single guest identity fields - no repeated [Box: ...] text
+        name: fullDisplayIdentity,
+        guestName: cleanGuestName,
+        guest_name: cleanGuestName,
+        fullName: cleanGuestName,
+        guest: fullDisplayIdentity,
+        guestDisplayName: fullDisplayIdentity,
+        displayName: fullDisplayIdentity,
+        user: fullDisplayIdentity,
+        nameOrRoom: fullDisplayIdentity,
+        nameOrRoomNumber: fullDisplayIdentity,
+        guestNameOrRoom: fullDisplayIdentity,
+        boxFilled: rawGuestInput || "Not specified",
+        roomBoxFilled: roomNumberFormatted,
+        yourNameOrRoomNumber: fullDisplayIdentity,
+        inputBoxFilled: rawGuestInput || "Not specified",
         room: roomNumberFormatted,
-        guestRoom: roomNumberFormatted,
+        roomNumber: roomNumberFormatted,
+        room_number: roomNumberFormatted,
         roomNum: hasRoom ? roomNumber : "Not specified",
-        rawGuestInput: rawGuestInput || "Verified Guest",
-        nameOrRoom: rawGuestInput || "Verified Guest",
-        nameOrRoomNumber: rawGuestInput || "Verified Guest",
-        guestNameOrRoom: rawGuestInput || "Verified Guest",
-        guestDisplayName: rawGuestInput || "Verified Guest",
-        displayName: rawGuestInput || "Verified Guest",
-        guestInfo: `${rawGuestInput || "Verified Guest"} | ${roomNumberFormatted} | ${guestNameDisplay}`,
+        guestRoom: roomNumberFormatted,
+        guestInfo: hasRoom && hasName ? `${cleanGuestName} | ${roomNumberFormatted}` : (hasRoom ? roomNumberFormatted : cleanGuestName),
         ratingId,
         submittedAt,
 

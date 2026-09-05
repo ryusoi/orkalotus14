@@ -244,6 +244,19 @@ export function renderStarString(score: number): string {
   return "★".repeat(rounded) + "☆".repeat(Math.max(0, 5 - rounded));
 }
 
+export function getStarBreakdown(score: number): {
+  filled: number;
+  unfilled: number;
+  stars: string;
+  label: string;
+} {
+  const filled = Math.min(5, Math.max(1, Math.round(score)));
+  const unfilled = 5 - filled;
+  const stars = "★".repeat(filled) + "☆".repeat(unfilled);
+  const label = `${filled} of 5 Stars Filled${unfilled > 0 ? ` • ${unfilled} Unfilled` : " • Full Score"}`;
+  return { filled, unfilled, stars, label };
+}
+
 /**
  * Generates bright emoji star string for ratings (e.g. ⭐⭐⭐).
  */
@@ -300,13 +313,15 @@ export function buildDetailedDimensionsTextBlock(options: {
       ? "(✓ Rated individually with secondary stars by guest)"
       : "(• Service & experience criteria evaluated in harmony with main rating)",
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-    ...sections.map(
-      (sec) =>
+    ...sections.map((sec) => {
+      const breakdown = getStarBreakdown(sec.score);
+      return (
         `${sec.num}. ${sec.name}\n` +
         `   Score: ${sec.score.toFixed(1)} / 5.0 — ${getLabel(sec.score)}\n` +
-        `   Stars: ${renderEmojiStars(sec.score)} (${renderStarString(sec.score)})\n` +
+        `   Stars: ${breakdown.stars} (${breakdown.label})\n` +
         `   --------------------------------------------------`
-    ),
+      );
+    }),
   ].join("\n");
 }
 
@@ -373,8 +388,14 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
     const hasRoom = Boolean(roomNumber && roomNumber !== "Not specified" && roomNumber !== "Not provided");
     const hasName = Boolean(guestName && guestName !== "Verified Guest" && guestName !== "Anonymous Guest" && !guestName.startsWith("Verified Guest (Room"));
     const roomNumberFormatted = hasRoom ? `Room ${roomNumber}` : "Not specified";
-    const guestNameDisplay = guestName || (hasRoom ? `Verified Guest (${roomNumberFormatted})` : "Verified Guest");
-    const fullGuestNameWithRoom = hasRoom && hasName ? `${guestName} (${roomNumberFormatted})` : (hasRoom ? roomNumberFormatted : guestNameDisplay);
+    const cleanGuestName = hasName ? guestName : "Verified Guest";
+    const guestNameDisplay = cleanGuestName;
+
+    const fullDisplayIdentity = hasRoom && hasName
+      ? `${cleanGuestName} (${roomNumberFormatted})`
+      : (hasRoom ? roomNumberFormatted : cleanGuestName);
+
+    const fullGuestNameWithRoom = fullDisplayIdentity;
 
     const recommendation = rating?.recommendation || "yes";
     const hasDetailed = Boolean(rating?.hasDetailedRatings || rating?.detailedRatingsGiven);
@@ -386,7 +407,13 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
       hour: "2-digit",
       minute: "2-digit",
     }) + " (Marmaris)";
-    const subject = `[ORKA LOTUS] New Guest Ranking: ${targetName} • Overall ${overall.toFixed(1)}/5.0 ★`;
+    const roomSubjectSnippet = hasRoom
+      ? ` • ${roomNumberFormatted}`
+      : "";
+    const nameSubjectSnippet = hasName
+      ? ` (${cleanGuestName})`
+      : "";
+    const subject = `[ORKA LOTUS] New Guest Ranking: ${targetName} • Overall ${overall.toFixed(1)}/5.0 ★${roomSubjectSnippet}${nameSubjectSnippet}`;
 
     const hospScore = Number(rating?.hospitalityRating ?? overall);
     const profScore = Number(rating?.professionalismRating ?? overall);
@@ -441,9 +468,8 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
     const guestHeaderBlock = [
       "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
       "👤 GUEST & STAY IDENTIFICATION:",
-      `• Box Filled (Name / Room): ${rawGuestInput || "Verified Guest"}`,
+      `• Guest Name: ${cleanGuestName}`,
       `• Room Number: ${roomNumberFormatted}`,
-      `• Guest Name: ${guestNameDisplay}`,
       "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     ].join("\n");
 
@@ -461,19 +487,28 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
       compliments: comment,
       rawComment: cleanRawComment || "No written feedback provided.",
       userComment: cleanRawComment || "No written feedback provided.",
-      // Pass all guest name, room number, and raw box filled properties
-      guestName: fullGuestNameWithRoom,
-      roomNumber: roomNumberFormatted,
+      // Clean single guest identity fields without duplicate text
+      name: fullDisplayIdentity,
+      guestName: cleanGuestName,
+      guest_name: cleanGuestName,
+      fullName: cleanGuestName,
+      guest: fullDisplayIdentity,
+      guestDisplayName: fullDisplayIdentity,
+      displayName: fullDisplayIdentity,
+      user: fullDisplayIdentity,
+      nameOrRoom: fullDisplayIdentity,
+      nameOrRoomNumber: fullDisplayIdentity,
+      guestNameOrRoom: fullDisplayIdentity,
+      boxFilled: rawGuestInput || "Not specified",
+      roomBoxFilled: roomNumberFormatted,
+      yourNameOrRoomNumber: fullDisplayIdentity,
+      inputBoxFilled: rawGuestInput || "Not specified",
       room: roomNumberFormatted,
-      guestRoom: roomNumberFormatted,
+      roomNumber: roomNumberFormatted,
+      room_number: roomNumberFormatted,
       roomNum: hasRoom ? roomNumber : "Not specified",
-      rawGuestInput: rawGuestInput || "Verified Guest",
-      nameOrRoom: rawGuestInput || "Verified Guest",
-      nameOrRoomNumber: rawGuestInput || "Verified Guest",
-      guestNameOrRoom: rawGuestInput || "Verified Guest",
-      guestDisplayName: rawGuestInput || "Verified Guest",
-      displayName: rawGuestInput || "Verified Guest",
-      guestInfo: `${rawGuestInput || "Verified Guest"} | ${roomNumberFormatted} | ${guestNameDisplay}`,
+      guestRoom: roomNumberFormatted,
+      guestInfo: hasRoom && hasName ? `${cleanGuestName} | ${roomNumberFormatted}` : (hasRoom ? roomNumberFormatted : cleanGuestName),
       ratingId,
       submittedAt: now.toISOString(),
       recipient: NOTIFICATION_RECIPIENTS,
@@ -800,7 +835,14 @@ export async function submitGuestRating(
   }
 
   const hasRoom = Boolean(parsedRoomNumber && parsedRoomNumber !== "Not specified" && parsedRoomNumber !== "Not provided");
+  const hasName = Boolean(parsedGuestName && parsedGuestName !== "Verified Guest" && parsedGuestName !== "Anonymous Guest" && !parsedGuestName.startsWith("Verified Guest (Room"));
   const formattedRoomNumber = hasRoom ? (parsedRoomNumber.startsWith("Room") ? parsedRoomNumber : `Room ${parsedRoomNumber}`) : "Not specified";
+  const cleanGuestName = hasName ? parsedGuestName : "Verified Guest";
+  const guestNameDisplay = cleanGuestName;
+
+  const fullDisplayIdentity = hasRoom && hasName
+    ? `${cleanGuestName} (${formattedRoomNumber})`
+    : (hasRoom ? formattedRoomNumber : cleanGuestName);
 
   const detailedDimensionsBlock = buildDetailedDimensionsTextBlock({
     overallScore: overall,
@@ -863,12 +905,26 @@ export async function submitGuestRating(
     comment: cleanComment ? `${cleanComment}\n\n${detailedDimensionsBlock}` : detailedDimensionsBlock,
     feedback: cleanComment ? `${cleanComment}\n\n${detailedDimensionsBlock}` : detailedDimensionsBlock,
     compliments: cleanComment ? `${cleanComment}\n\n${detailedDimensionsBlock}` : detailedDimensionsBlock,
-    guestName: parsedGuestName,
+    name: fullDisplayIdentity,
+    guestName: cleanGuestName,
+    guest_name: cleanGuestName,
+    fullName: cleanGuestName,
+    guest: fullDisplayIdentity,
+    displayName: fullDisplayIdentity,
+    guestDisplayName: fullDisplayIdentity,
+    room: formattedRoomNumber,
     roomNumber: formattedRoomNumber,
-    guestDisplayName: cleanDisplayName,
-    rawGuestInput: rawGuestInput || "Verified Guest",
-    nameOrRoomNumber: rawGuestInput || "Verified Guest",
-    guestNameOrRoom: rawGuestInput || "Verified Guest",
+    room_number: formattedRoomNumber,
+    roomNum: hasRoom ? parsedRoomNumber : "Not specified",
+    guestRoom: formattedRoomNumber,
+    rawGuestInput: rawGuestInput || "Not specified",
+    boxFilled: rawGuestInput || "Not specified",
+    roomBoxFilled: formattedRoomNumber,
+    yourNameOrRoomNumber: fullDisplayIdentity,
+    nameOrRoom: fullDisplayIdentity,
+    nameOrRoomNumber: fullDisplayIdentity,
+    guestNameOrRoom: fullDisplayIdentity,
+    guestInfo: hasRoom && hasName ? `${cleanGuestName} | ${formattedRoomNumber}` : (hasRoom ? formattedRoomNumber : cleanGuestName),
     anonymous: Boolean(input.anonymous),
 
     // Session & timestamp
