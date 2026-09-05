@@ -55,6 +55,9 @@ interface RatingData {
   guestDisplayName?: string;
   guestName?: string;
   roomNumber?: string;
+  rawGuestInput?: string;
+  nameOrRoomNumber?: string;
+  guestNameOrRoom?: string;
   anonymous?: boolean;
   submissionSessionId?: string;
   createdAt?: string;
@@ -83,41 +86,75 @@ function isConfiguredResendApiKey(key?: string): boolean {
 /**
  * Extracts guest name and room number cleanly from data or display name string.
  */
-function parseGuestAndRoom(data: RatingData): { guestName: string; roomNumber: string } {
-  let guestName = (data.guestName || "").trim();
-  let roomNumber = (data.roomNumber || "").trim();
+function parseGuestAndRoom(data: RatingData): {
+  guestName: string;
+  roomNumber: string;
+  rawGuestInput: string;
+  roomNumberFormatted: string;
+  guestNameDisplay: string;
+  hasRoom: boolean;
+  hasName: boolean;
+} {
+  const rawGuestInput = String(
+    data.rawGuestInput ||
+    data.nameOrRoomNumber ||
+    data.guestNameOrRoom ||
+    data.guestDisplayName ||
+    ""
+  ).trim();
 
-  if ((!guestName || guestName === "Verified Guest") && data.guestDisplayName) {
-    const raw = data.guestDisplayName.trim();
-    // Check for room number patterns (e.g. "Room 1402", "Oda 204", "Rm 310", "1402")
-    const roomMatch =
-      raw.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i) ||
-      raw.match(/\b([0-9]{3,4}[a-zA-Z]?)\b/);
-    if (roomMatch) {
-      if (!roomNumber || roomNumber === "Not provided" || roomNumber === "Not specified") {
-        roomNumber = roomMatch[1];
-      }
-      const stripped = raw
-        .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
-        .replace(new RegExp(`\\b${roomMatch[1]}\\b`, "g"), "")
-        .replace(/^[\s\-–—,./|:]+|[\s\-–—,./|:]+$/g, "")
-        .trim();
-      if (stripped) {
-        guestName = stripped;
-      }
-    } else {
-      guestName = raw;
+  let guestName = String(data.guestName || "").trim();
+  let roomNumber = String(data.roomNumber || "").trim();
+
+  if (roomNumber && roomNumber !== "Not specified" && roomNumber !== "Not provided") {
+    roomNumber = roomNumber.replace(/^(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*/i, "").trim();
+  } else {
+    roomNumber = "";
+  }
+
+  const textToSearch = [rawGuestInput, guestName].filter(Boolean).join(" ");
+  if (!roomNumber && textToSearch) {
+    const keywordMatch = textToSearch.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i);
+    const numberMatch = textToSearch.match(/\b([0-9]{1,5}[a-zA-Z]?|[a-zA-Z][0-9]{1,4})\b/);
+    const match = keywordMatch || numberMatch;
+    if (match) {
+      roomNumber = match[1].trim();
     }
   }
 
-  if (!guestName) {
+  if (rawGuestInput) {
+    if (roomNumber) {
+      const stripped = rawGuestInput
+        .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
+        .replace(new RegExp(`\\b${roomNumber}\\b`, "gi"), "")
+        .replace(/^[\s\-–—,./|:;()]+|[\s\-–—,./|:;()]+$/g, "")
+        .trim();
+      if (stripped) {
+        guestName = stripped;
+      } else {
+        guestName = `Verified Guest (Room ${roomNumber})`;
+      }
+    } else {
+      guestName = rawGuestInput;
+    }
+  } else if (!guestName || guestName === "Verified Guest") {
     guestName = data.anonymous ? "Anonymous Guest" : "Verified Guest";
   }
-  if (!roomNumber || roomNumber === "Not provided") {
-    roomNumber = "Not specified";
-  }
 
-  return { guestName, roomNumber };
+  const hasRoom = Boolean(roomNumber && roomNumber !== "Not specified" && roomNumber !== "Not provided");
+  const hasName = Boolean(guestName && guestName !== "Verified Guest" && guestName !== "Anonymous Guest" && !guestName.startsWith("Verified Guest (Room"));
+  const roomNumberFormatted = hasRoom ? `Room ${roomNumber}` : "Not specified";
+  const guestNameDisplay = guestName || (hasRoom ? `Verified Guest (${roomNumberFormatted})` : "Verified Guest");
+
+  return {
+    guestName: hasRoom && hasName ? `${guestName} (${roomNumberFormatted})` : guestNameDisplay,
+    roomNumber: roomNumberFormatted,
+    rawGuestInput,
+    roomNumberFormatted,
+    guestNameDisplay,
+    hasRoom,
+    hasName,
+  };
 }
 
 /**
@@ -172,7 +209,15 @@ function getRecommendationLabel(rec?: string): string {
 function buildHtmlEmail(data: RatingData, ratingId: string): string {
   const overall = typeof data.overallRating === "number" ? data.overallRating : 5.0;
   const targetName = data.targetName || data.targetId || "Orka Lotus Beach Experience";
-  const { guestName, roomNumber } = parseGuestAndRoom(data);
+  const {
+    guestName,
+    roomNumber,
+    rawGuestInput,
+    roomNumberFormatted,
+    guestNameDisplay,
+    hasRoom,
+    hasName,
+  } = parseGuestAndRoom(data);
   const firstStars = data.firstStars || renderStarScore(overall);
 
   const formattedDate = data.createdAt
@@ -460,19 +505,39 @@ function buildHtmlEmail(data: RatingData, ratingId: string): string {
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; width: 38%; border-bottom: 1px solid #142a3f;">Guest Name:</td>
-                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${guestName}</td>
+                  <td style="padding: 12px 18px; font-size: 12px; color: #94a3b8; width: 38%; border-bottom: 1px solid #142a3f;">
+                    Name / Room Box Filled:
+                  </td>
+                  <td style="padding: 12px 18px; font-size: 13px; font-weight: 800; border-bottom: 1px solid #142a3f;">
+                    ${rawGuestInput
+                      ? `<span style="display: inline-block; padding: 4px 12px; background-color: rgba(254, 240, 138, 0.15); border: 1.5px solid #d4af37; border-radius: 8px; color: #fef08a; font-size: 13px; font-weight: 800; letter-spacing: 0.3px;">${rawGuestInput}</span>`
+                      : `<span style="color: #94a3b8; font-style: italic;">Not provided (Anonymous / Verified Guest)</span>`}
+                  </td>
                 </tr>
                 <tr>
-                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Room Number:</td>
-                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${roomNumber}</td>
+                  <td style="padding: 12px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">
+                    Room Number:
+                  </td>
+                  <td style="padding: 12px 18px; font-size: 13px; font-weight: 800; border-bottom: 1px solid #142a3f;">
+                    ${hasRoom
+                      ? `<span style="display: inline-block; padding: 4px 12px; background-color: rgba(52, 211, 153, 0.15); border: 1.5px solid #059669; border-radius: 8px; color: #34d399; font-size: 13px; font-weight: 800; letter-spacing: 0.5px;">✓ ${roomNumberFormatted}</span>`
+                      : `<span style="color: #94a3b8; font-style: italic;">Not specified</span>`}
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">
+                    Guest Name:
+                  </td>
+                  <td style="padding: 12px 18px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">
+                    ${guestNameDisplay}
+                  </td>
                 </tr>
                 <tr>
                   <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Submission Date & Time:</td>
                   <td style="padding: 11px 18px; font-size: 12px; font-weight: 600; color: #ffffff; border-bottom: 1px solid #142a3f;">${formattedDate}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Rating ID:</td>
+                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Rating Reference ID:</td>
                   <td style="padding: 11px 18px; font-size: 12px; font-family: monospace; color: #d4af37; border-bottom: 1px solid #142a3f;">${ratingId}</td>
                 </tr>
                 <tr>
@@ -557,7 +622,13 @@ function buildHtmlEmail(data: RatingData, ratingId: string): string {
 function buildTextEmail(data: RatingData, ratingId: string): string {
   const overall = typeof data.overallRating === "number" ? data.overallRating : 5.0;
   const targetName = data.targetName || data.targetId || "Orka Lotus Beach Experience";
-  const { guestName, roomNumber } = parseGuestAndRoom(data);
+  const {
+    guestName,
+    roomNumber,
+    rawGuestInput,
+    roomNumberFormatted,
+    guestNameDisplay,
+  } = parseGuestAndRoom(data);
   const firstStars = data.firstStars || renderStarScore(overall);
 
   const hasDetailed = Boolean(
@@ -617,8 +688,9 @@ Recommendation: ${getRecommendationLabel(data.recommendation)}
 
 3. GUEST & SUBMISSION DETAILS
 -----------------------------------------------------
-Guest Name: ${guestName}
-Room Number: ${roomNumber}
+"Your Name or Room Number" Box: ${rawGuestInput || "Not provided (Verified Guest)"}
+Room Number: ${roomNumberFormatted}
+Guest Name: ${guestNameDisplay}
 Submission Time: ${data.createdAt || new Date().toISOString()}
 Rating ID: ${ratingId}
 Audit Status: Verified Guest Evaluation

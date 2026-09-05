@@ -34,6 +34,9 @@ export interface RatingSubmissionInput {
   guestDisplayName?: string;
   guestName?: string;
   roomNumber?: string;
+  rawGuestInput?: string;
+  nameOrRoomNumber?: string;
+  guestNameOrRoom?: string;
   anonymous?: boolean;
   hasDetailedRatings?: boolean;
   detailedRatingsGiven?: boolean;
@@ -319,8 +322,60 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
     const firstStars = renderStarString(overall);
     const targetName = rating?.targetName || rating?.targetId || "Hotel Experience";
     const categoryName = rating?.categoryName || rating?.category || "General Service";
-    const guestName = rating?.guestName || rating?.guestDisplayName || (rating?.anonymous ? "Anonymous Guest" : "Guest");
-    const roomNumber = rating?.roomNumber && rating.roomNumber !== "Not specified" ? (rating.roomNumber.startsWith("Room") ? rating.roomNumber : `Room ${rating.roomNumber}`) : (rating?.roomNumber || "Not specified");
+    const rawGuestInput = String(
+      rating?.rawGuestInput ||
+      rating?.nameOrRoomNumber ||
+      rating?.guestNameOrRoom ||
+      rating?.guestDisplayName ||
+      ""
+    ).trim();
+
+    let guestName = String(rating?.guestName || "").trim();
+    let roomNumber = String(rating?.roomNumber || "").trim();
+
+    // Clean existing roomNumber
+    if (roomNumber && roomNumber !== "Not specified" && roomNumber !== "Not provided") {
+      roomNumber = roomNumber.replace(/^(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*/i, "").trim();
+    } else {
+      roomNumber = "";
+    }
+
+    // Try extracting room number from rawGuestInput or guestName if not already set
+    const textToSearch = [rawGuestInput, guestName].filter(Boolean).join(" ");
+    if (!roomNumber && textToSearch) {
+      const keywordMatch = textToSearch.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i);
+      const numberMatch = textToSearch.match(/\b([0-9]{1,5}[a-zA-Z]?|[a-zA-Z][0-9]{1,4})\b/);
+      const roomMatch = keywordMatch || numberMatch;
+      if (roomMatch) {
+        roomNumber = roomMatch[1].trim();
+      }
+    }
+
+    if (rawGuestInput) {
+      if (roomNumber) {
+        const stripped = rawGuestInput
+          .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
+          .replace(new RegExp(`\\b${roomNumber}\\b`, "gi"), "")
+          .replace(/^[\s\-–—,./|:;()]+|[\s\-–—,./|:;()]+$/g, "")
+          .trim();
+        if (stripped) {
+          guestName = stripped;
+        } else {
+          guestName = `Verified Guest (Room ${roomNumber})`;
+        }
+      } else {
+        guestName = rawGuestInput;
+      }
+    } else if (!guestName || guestName === "Verified Guest") {
+      guestName = rating?.anonymous ? "Anonymous Guest" : "Verified Guest";
+    }
+
+    const hasRoom = Boolean(roomNumber && roomNumber !== "Not specified" && roomNumber !== "Not provided");
+    const hasName = Boolean(guestName && guestName !== "Verified Guest" && guestName !== "Anonymous Guest" && !guestName.startsWith("Verified Guest (Room"));
+    const roomNumberFormatted = hasRoom ? `Room ${roomNumber}` : "Not specified";
+    const guestNameDisplay = guestName || (hasRoom ? `Verified Guest (${roomNumberFormatted})` : "Verified Guest");
+    const fullGuestNameWithRoom = hasRoom && hasName ? `${guestName} (${roomNumberFormatted})` : (hasRoom ? roomNumberFormatted : guestNameDisplay);
+
     const recommendation = rating?.recommendation || "yes";
     const hasDetailed = Boolean(rating?.hasDetailedRatings || rating?.detailedRatingsGiven);
     const now = new Date();
@@ -383,9 +438,18 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
       ? rawComment.split("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")[0].trim()
       : rawComment;
 
+    const guestHeaderBlock = [
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "👤 GUEST & STAY IDENTIFICATION:",
+      `• Box Filled (Name / Room): ${rawGuestInput || "Verified Guest"}`,
+      `• Room Number: ${roomNumberFormatted}`,
+      `• Guest Name: ${guestNameDisplay}`,
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ].join("\n");
+
     const comment = cleanRawComment && cleanRawComment !== "No written feedback provided."
-      ? `${cleanRawComment}\n\n${detailedDimensionsBlock}`
-      : detailedDimensionsBlock;
+      ? `${guestHeaderBlock}\n\n💬 GUEST FEEDBACK:\n${cleanRawComment}\n\n${detailedDimensionsBlock}`
+      : `${guestHeaderBlock}\n\n${detailedDimensionsBlock}`;
 
     const appsScriptPayload = {
       category: categoryName,
@@ -397,8 +461,19 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
       compliments: comment,
       rawComment: cleanRawComment || "No written feedback provided.",
       userComment: cleanRawComment || "No written feedback provided.",
-      guestName,
-      roomNumber,
+      // Pass all guest name, room number, and raw box filled properties
+      guestName: fullGuestNameWithRoom,
+      roomNumber: roomNumberFormatted,
+      room: roomNumberFormatted,
+      guestRoom: roomNumberFormatted,
+      roomNum: hasRoom ? roomNumber : "Not specified",
+      rawGuestInput: rawGuestInput || "Verified Guest",
+      nameOrRoom: rawGuestInput || "Verified Guest",
+      nameOrRoomNumber: rawGuestInput || "Verified Guest",
+      guestNameOrRoom: rawGuestInput || "Verified Guest",
+      guestDisplayName: rawGuestInput || "Verified Guest",
+      displayName: rawGuestInput || "Verified Guest",
+      guestInfo: `${rawGuestInput || "Verified Guest"} | ${roomNumberFormatted} | ${guestNameDisplay}`,
       ratingId,
       submittedAt: now.toISOString(),
       recipient: NOTIFICATION_RECIPIENTS,
@@ -676,33 +751,56 @@ export async function submitGuestRating(
     ? `Hospitality: ${hospStars} (${hospScore.toFixed(1)}/5.0) • Professionalism: ${profStars} (${profScore.toFixed(1)}/5.0) • Helpfulness: ${helpStars} (${helpScore.toFixed(1)}/5.0) • Courtesy: ${courtStars} (${courtScore.toFixed(1)}/5.0) • ${qualityLabel}: ${qualStars} (${qualScore.toFixed(1)}/5.0)`
     : "Primary overall rating provided (optional detailed culinary & service dimensions not rated)";
 
-  // Parse guest name and room number cleanly
-  let parsedGuestName = input.guestName?.trim() || cleanDisplayName;
+  // Parse guest name, room number, and exact raw text from input
+  const rawGuestInput = String(
+    input.rawGuestInput ||
+    input.nameOrRoomNumber ||
+    input.guestNameOrRoom ||
+    cleanDisplayName ||
+    ""
+  ).trim();
+
+  let parsedGuestName = input.guestName?.trim() || "";
   let parsedRoomNumber = input.roomNumber?.trim() || "";
 
-  if (!parsedRoomNumber && cleanDisplayName) {
-    const roomMatch =
-      cleanDisplayName.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i) ||
-      cleanDisplayName.match(/\b([0-9]{3,4}[a-zA-Z]?)\b/);
+  if (parsedRoomNumber && parsedRoomNumber !== "Not specified" && parsedRoomNumber !== "Not provided") {
+    parsedRoomNumber = parsedRoomNumber.replace(/^(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*/i, "").trim();
+  } else {
+    parsedRoomNumber = "";
+  }
+
+  // Check if room number exists in rawGuestInput or cleanDisplayName
+  const textToSearch = [rawGuestInput, cleanDisplayName].filter(Boolean).join(" ");
+  if (!parsedRoomNumber && textToSearch) {
+    const keywordMatch = textToSearch.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i);
+    const numberMatch = textToSearch.match(/\b([0-9]{1,5}[a-zA-Z]?|[a-zA-Z][0-9]{1,4})\b/);
+    const roomMatch = keywordMatch || numberMatch;
     if (roomMatch) {
-      parsedRoomNumber = roomMatch[1];
-      const stripped = cleanDisplayName
-        .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
-        .replace(new RegExp(`\\b${roomMatch[1]}\\b`, "g"), "")
-        .replace(/^[\s\-–—,./|:]+|[\s\-–—,./|:]+$/g, "")
-        .trim();
-      if (stripped) {
-        parsedGuestName = stripped;
-      }
+      parsedRoomNumber = roomMatch[1].trim();
     }
   }
 
-  if (!parsedGuestName || parsedGuestName === "Verified Guest") {
+  if (rawGuestInput) {
+    if (parsedRoomNumber) {
+      const stripped = rawGuestInput
+        .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
+        .replace(new RegExp(`\\b${parsedRoomNumber}\\b`, "gi"), "")
+        .replace(/^[\s\-–—,./|:;()]+|[\s\-–—,./|:;()]+$/g, "")
+        .trim();
+      if (stripped) {
+        parsedGuestName = stripped;
+      } else {
+        parsedGuestName = `Verified Guest (Room ${parsedRoomNumber})`;
+      }
+    } else {
+      parsedGuestName = rawGuestInput;
+    }
+  } else if (!parsedGuestName || parsedGuestName === "Verified Guest") {
     parsedGuestName = input.anonymous ? "Anonymous Guest" : "Verified Guest";
   }
-  if (!parsedRoomNumber) {
-    parsedRoomNumber = "Not specified";
-  }
+
+  const hasRoom = Boolean(parsedRoomNumber && parsedRoomNumber !== "Not specified" && parsedRoomNumber !== "Not provided");
+  const formattedRoomNumber = hasRoom ? (parsedRoomNumber.startsWith("Room") ? parsedRoomNumber : `Room ${parsedRoomNumber}`) : "Not specified";
 
   const detailedDimensionsBlock = buildDetailedDimensionsTextBlock({
     overallScore: overall,
@@ -766,8 +864,11 @@ export async function submitGuestRating(
     feedback: cleanComment ? `${cleanComment}\n\n${detailedDimensionsBlock}` : detailedDimensionsBlock,
     compliments: cleanComment ? `${cleanComment}\n\n${detailedDimensionsBlock}` : detailedDimensionsBlock,
     guestName: parsedGuestName,
-    roomNumber: parsedRoomNumber,
+    roomNumber: formattedRoomNumber,
     guestDisplayName: cleanDisplayName,
+    rawGuestInput: rawGuestInput || "Verified Guest",
+    nameOrRoomNumber: rawGuestInput || "Verified Guest",
+    guestNameOrRoom: rawGuestInput || "Verified Guest",
     anonymous: Boolean(input.anonymous),
 
     // Session & timestamp

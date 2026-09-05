@@ -231,40 +231,61 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
       const comment = (rating.comment || rating.feedback || rating.compliments || "").trim();
       const submittedAt = rating.createdAt || rating.submittedAt || nowIso;
 
-      // Cleanly parse guest name and room number
-      let guestName = (rating.guestName || "").trim();
-      let roomNumber = (rating.roomNumber || "").trim();
-      const rawDisplayName = (rating.guestDisplayName || "").trim();
+      // Cleanly parse guest name, room number, and exact raw text from the "Your Name or Room Number" input box
+      const rawGuestInput = String(
+        rating.rawGuestInput ||
+        rating.nameOrRoomNumber ||
+        rating.guestNameOrRoom ||
+        rating.guestDisplayName ||
+        ""
+      ).trim();
 
-      if (!guestName || guestName === "Verified Guest") {
-        if (rawDisplayName) {
-          const roomMatch =
-            rawDisplayName.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i) ||
-            rawDisplayName.match(/\b([0-9]{3,4}[a-zA-Z]?)\b/);
-          if (roomMatch) {
-            if (!roomNumber || roomNumber === "Not provided" || roomNumber === "Not specified") {
-              roomNumber = roomMatch[1];
-            }
-            const stripped = rawDisplayName
-              .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
-              .replace(new RegExp(`\\b${roomMatch[1]}\\b`, "g"), "")
-              .replace(/^[\s\-–—,./|:]+|[\s\-–—,./|:]+$/g, "")
-              .trim();
-            if (stripped) {
-              guestName = stripped;
-            }
-          } else {
-            guestName = rawDisplayName;
-          }
+      let guestName = String(rating.guestName || "").trim();
+      let roomNumber = String(rating.roomNumber || "").trim();
+
+      // Clean existing roomNumber
+      if (roomNumber && roomNumber !== "Not specified" && roomNumber !== "Not provided") {
+        roomNumber = roomNumber.replace(/^(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*/i, "").trim();
+      } else {
+        roomNumber = "";
+      }
+
+      // Check if room number is contained in rawGuestInput, guestName, or rating.room
+      const textToSearch = [rawGuestInput, guestName, rating.room || ""].filter(Boolean).join(" ");
+      if (!roomNumber && textToSearch) {
+        const keywordMatch = textToSearch.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i);
+        const numberMatch = textToSearch.match(/\b([0-9]{1,5}[a-zA-Z]?|[a-zA-Z][0-9]{1,4})\b/);
+        const match = keywordMatch || numberMatch;
+        if (match) {
+          roomNumber = match[1].trim();
         }
       }
 
-      if (!guestName) {
+      // If guestName was set to room number or missing, extract real guest name
+      if (rawGuestInput) {
+        if (roomNumber) {
+          const stripped = rawGuestInput
+            .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
+            .replace(new RegExp(`\\b${roomNumber}\\b`, "gi"), "")
+            .replace(/^[\s\-–—,./|:;()]+|[\s\-–—,./|:;()]+$/g, "")
+            .trim();
+          if (stripped) {
+            guestName = stripped;
+          } else {
+            guestName = `Verified Guest (Room ${roomNumber})`;
+          }
+        } else {
+          guestName = rawGuestInput;
+        }
+      } else if (!guestName || guestName === "Verified Guest") {
         guestName = rating.anonymous ? "Anonymous Guest" : "Verified Guest";
       }
-      if (!roomNumber || roomNumber === "Not provided") {
-        roomNumber = "Not specified";
-      }
+
+      const hasRoom = Boolean(roomNumber && roomNumber !== "Not specified" && roomNumber !== "Not provided");
+      const hasName = Boolean(guestName && guestName !== "Verified Guest" && guestName !== "Anonymous Guest" && !guestName.startsWith("Verified Guest (Room"));
+      const roomNumberFormatted = hasRoom ? `Room ${roomNumber}` : "Not specified";
+      const guestNameDisplay = guestName || (hasRoom ? `Verified Guest (${roomNumberFormatted})` : "Verified Guest");
+      const fullGuestNameWithRoom = hasRoom && hasName ? `${guestName} (${roomNumberFormatted})` : (hasRoom ? roomNumberFormatted : guestNameDisplay);
 
       // First stars for main rating
       const firstStars =
@@ -464,9 +485,18 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
         ? rawUserComment.split("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")[0].trim()
         : rawUserComment;
 
+      const guestHeaderBlock = [
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "👤 GUEST & STAY IDENTIFICATION:",
+        `• Box Filled (Name / Room): ${rawGuestInput || "Verified Guest"}`,
+        `• Room Number: ${roomNumberFormatted}`,
+        `• Guest Name: ${guestNameDisplay}`,
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      ].join("\n");
+
       const formattedCommentForAppsScript = cleanRawUserComment && cleanRawUserComment !== "No written feedback provided."
-        ? `${cleanRawUserComment}\n\n${detailedDimensionsBlock}`
-        : detailedDimensionsBlock;
+        ? `${guestHeaderBlock}\n\n💬 GUEST FEEDBACK:\n${cleanRawUserComment}\n\n${detailedDimensionsBlock}`
+        : `${guestHeaderBlock}\n\n${detailedDimensionsBlock}`;
 
       const getRecLabel = (rec?: string) => {
         switch (rec) {
@@ -658,19 +688,39 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; width: 38%; border-bottom: 1px solid #142a3f;">Guest Name:</td>
-                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${guestName}</td>
+                  <td style="padding: 12px 18px; font-size: 12px; color: #94a3b8; width: 38%; border-bottom: 1px solid #142a3f;">
+                    Name / Room Box Filled:
+                  </td>
+                  <td style="padding: 12px 18px; font-size: 13px; font-weight: 800; border-bottom: 1px solid #142a3f;">
+                    ${rawGuestInput
+                      ? `<span style="display: inline-block; padding: 4px 12px; background-color: rgba(254, 240, 138, 0.15); border: 1.5px solid #d4af37; border-radius: 8px; color: #fef08a; font-size: 13px; font-weight: 800; letter-spacing: 0.3px;">${rawGuestInput}</span>`
+                      : `<span style="color: #94a3b8; font-style: italic;">Not provided (Anonymous / Verified Guest)</span>`}
+                  </td>
                 </tr>
                 <tr>
-                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Room Number:</td>
-                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${roomNumber}</td>
+                  <td style="padding: 12px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">
+                    Room Number:
+                  </td>
+                  <td style="padding: 12px 18px; font-size: 13px; font-weight: 800; border-bottom: 1px solid #142a3f;">
+                    ${hasRoom
+                      ? `<span style="display: inline-block; padding: 4px 12px; background-color: rgba(52, 211, 153, 0.15); border: 1.5px solid #059669; border-radius: 8px; color: #34d399; font-size: 13px; font-weight: 800; letter-spacing: 0.5px;">✓ ${roomNumberFormatted}</span>`
+                      : `<span style="color: #94a3b8; font-style: italic;">Not specified</span>`}
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">
+                    Guest Name:
+                  </td>
+                  <td style="padding: 12px 18px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">
+                    ${guestNameDisplay}
+                  </td>
                 </tr>
                 <tr>
                   <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Submission Date & Time:</td>
                   <td style="padding: 11px 18px; font-size: 12px; font-weight: 600; color: #ffffff; border-bottom: 1px solid #142a3f;">${formattedDate}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Rating ID:</td>
+                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Rating Reference ID:</td>
                   <td style="padding: 11px 18px; font-size: 12px; font-family: monospace; color: #d4af37; border-bottom: 1px solid #142a3f;">${ratingId}</td>
                 </tr>
                 <tr>
@@ -767,8 +817,9 @@ Recommendation: ${getRecLabel(recommendation)}
 
 3. GUEST & SUBMISSION DETAILS
 -----------------------------------------------------
-Guest Name: ${guestName}
-Room Number: ${roomNumber}
+"Your Name or Room Number" Box: ${rawGuestInput || "Not provided (Verified Guest)"}
+Room Number: ${roomNumberFormatted}
+Guest Name: ${guestNameDisplay}
 Submission Time: ${formattedDate}
 Rating ID: ${ratingId}
 Audit Status: Verified Guest Evaluation
@@ -810,8 +861,19 @@ Orka Lotus Beach Hotel Executive Quality Assurance Directorate
         compliments: formattedCommentForAppsScript,
         rawComment: cleanRawUserComment || "No written feedback provided.",
         userComment: cleanRawUserComment || "No written feedback provided.",
-        guestName,
-        roomNumber,
+        // Explicit guest identity fields
+        guestName: fullGuestNameWithRoom,
+        roomNumber: roomNumberFormatted,
+        room: roomNumberFormatted,
+        guestRoom: roomNumberFormatted,
+        roomNum: hasRoom ? roomNumber : "Not specified",
+        rawGuestInput: rawGuestInput || "Verified Guest",
+        nameOrRoom: rawGuestInput || "Verified Guest",
+        nameOrRoomNumber: rawGuestInput || "Verified Guest",
+        guestNameOrRoom: rawGuestInput || "Verified Guest",
+        guestDisplayName: rawGuestInput || "Verified Guest",
+        displayName: rawGuestInput || "Verified Guest",
+        guestInfo: `${rawGuestInput || "Verified Guest"} | ${roomNumberFormatted} | ${guestNameDisplay}`,
         ratingId,
         submittedAt,
 

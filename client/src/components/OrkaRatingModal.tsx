@@ -310,26 +310,33 @@ export const OrkaRatingModal: React.FC<OrkaRatingModalProps> = ({
     setRecentWarning(false);
 
     try {
-      // Parse guest name and room number cleanly from input
-      const rawName = guestName.trim();
-      let parsedGuestName = rawName || "Verified Guest";
+      // Cleanly parse guest name, room number, and exact raw text from input
+      const rawInput = guestName.trim();
+      let parsedGuestName = rawInput;
       let parsedRoomNumber = "";
 
-      if (rawName) {
-        const roomMatch =
-          rawName.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i) ||
-          rawName.match(/\b([0-9]{3,4}[a-zA-Z]?)\b/);
+      if (rawInput) {
+        const keywordMatch = rawInput.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i);
+        const numberMatch = rawInput.match(/\b([0-9]{1,5}[a-zA-Z]?|[a-zA-Z][0-9]{1,4})\b/);
+        const roomMatch = keywordMatch || numberMatch;
+
         if (roomMatch) {
-          parsedRoomNumber = roomMatch[1];
-          const stripped = rawName
+          parsedRoomNumber = roomMatch[1].trim();
+          const stripped = rawInput
             .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
-            .replace(new RegExp(`\\b${roomMatch[1]}\\b`, "g"), "")
-            .replace(/^[\s\-–—,./|:]+|[\s\-–—,./|:]+$/g, "")
+            .replace(new RegExp(`\\b${roomMatch[1]}\\b`, "gi"), "")
+            .replace(/^[\s\-–—,./|:;()]+|[\s\-–—,./|:;()]+$/g, "")
             .trim();
           if (stripped) {
             parsedGuestName = stripped;
+          } else {
+            parsedGuestName = `Verified Guest (Room ${parsedRoomNumber})`;
           }
         }
+      }
+
+      if (!parsedGuestName) {
+        parsedGuestName = rawInput || "Verified Guest";
       }
 
       // Always compute and guarantee all 6 dimensions (Overall, Hospitality, Professionalism, Helpfulness, Courtesy, Quality)
@@ -359,10 +366,12 @@ export const OrkaRatingModal: React.FC<OrkaRatingModalProps> = ({
           dimensionScores: effectiveDetailedScores,
           recommendation,
           comment: comment.trim(),
-          guestDisplayName: rawName || "Verified Guest",
+          guestDisplayName: rawInput || "Verified Guest",
           guestName: parsedGuestName,
-          roomNumber: parsedRoomNumber,
-          anonymous: !rawName,
+          roomNumber: parsedRoomNumber ? (parsedRoomNumber.startsWith("Room") ? parsedRoomNumber : `Room ${parsedRoomNumber}`) : "",
+          rawGuestInput: rawInput,
+          nameOrRoomNumber: rawInput,
+          anonymous: !rawInput,
         }),
         new Promise((resolve) => setTimeout(resolve, 200)),
       ]);
