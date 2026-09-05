@@ -1,6 +1,6 @@
 {
   "name": "Remix orkalotus14",
-  "description": "after hardcode rating orkalotus14",
+  "description": "ORKA LOTUS BEACH HOTEL — Guest Experience Ranking & Hospitality Feedback System",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

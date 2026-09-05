@@ -124,20 +124,28 @@ function parseGuestAndRoom(data: RatingData): { guestName: string; roomNumber: s
  * Generates an SVG/HTML visual star representation for ratings.
  */
 function renderStarScore(score: number): string {
-  const fullStars = Math.floor(score);
-  const halfStar = score - fullStars >= 0.5;
-  const stars: string[] = [];
+  const rounded = Math.min(5, Math.max(1, Math.round(score)));
+  return "★".repeat(rounded) + "☆".repeat(Math.max(0, 5 - rounded));
+}
 
-  for (let i = 0; i < 5; i++) {
-    if (i < fullStars) {
-      stars.push("★");
-    } else if (i === fullStars && halfStar) {
-      stars.push("★");
-    } else {
-      stars.push("☆");
-    }
-  }
-  return stars.join(" ");
+function renderHtmlStarScore(score: number): string {
+  const rounded = Math.min(5, Math.max(1, Math.round(score)));
+  const filled = "★ ".repeat(rounded).trim();
+  const empty = rounded < 5 ? " ☆".repeat(5 - rounded) : "";
+  return `<span style="color: #fbbf24; font-size: 22px; letter-spacing: 4px; text-shadow: 0 0 10px rgba(251,191,36,0.6);">${filled}</span>${empty ? `<span style="color: #475569; font-size: 22px; letter-spacing: 4px;">${empty}</span>` : ""}`;
+}
+
+function renderTextStarScore(score: number): string {
+  const rounded = Math.min(5, Math.max(1, Math.round(score)));
+  return "⭐ ".repeat(rounded).trim();
+}
+
+function getScoreLabel(score: number): string {
+  if (score >= 4.75) return "Exceptional";
+  if (score >= 3.75) return "Very Good";
+  if (score >= 2.75) return "Good";
+  if (score >= 1.75) return "Fair / Needs Attention";
+  return "Poor / Urgent Review";
 }
 
 /**
@@ -148,7 +156,7 @@ function getRecommendationLabel(rec?: string): string {
     case "absolutely":
       return "✓ Absolutely Recommended (100% Enthusiastic)";
     case "yes":
-      return "✓ Yes, Recommended";
+      return "✓ Yes, Highly Recommend";
     case "maybe":
       return "• Neutral / Maybe";
     case "probably_not":
@@ -199,12 +207,6 @@ function buildHtmlEmail(data: RatingData, ratingId: string): string {
   const courtScore = Number(data.courtesyRating ?? overall);
   const qualScore = Number(data.qualityRating ?? overall);
 
-  const hospStars = data.hospitalityStars || renderStarScore(hospScore);
-  const profStars = data.professionalismStars || renderStarScore(profScore);
-  const helpStars = data.helpfulnessStars || renderStarScore(helpScore);
-  const courtStars = data.courtesyStars || renderStarScore(courtScore);
-  const qualStars = data.qualityStars || renderStarScore(qualScore);
-
   const isCulinary =
     data.categoryName === "Food & Beverage" ||
     data.category === "culinary_fb" ||
@@ -217,7 +219,138 @@ function buildHtmlEmail(data: RatingData, ratingId: string): string {
     ? "Culinary & Service Quality"
     : "Service & Execution Quality";
 
+  const defaultExperienceDesc = isCulinary
+    ? "Evaluate your culinary journey across Orka Lotus Beach Hotel — covering flavor richness, buffet presentation, ingredient freshness, barista & mixology beverages, and attentive dining hospitality."
+    : "Official executive guest evaluation for Orka Lotus Beach Hotel — upholding five-star Aegean hospitality, exemplary service quality standards, and personalized guest satisfaction.";
+
+  const dimensionList = [
+    {
+      num: "01",
+      name: "Overall Guest Experience",
+      subtitle: "General satisfaction and Aegean resort experience",
+      score: overall,
+      starsHtml: renderHtmlStarScore(overall),
+      starsText: renderTextStarScore(overall),
+      starsPlain: renderStarScore(overall),
+      label: getScoreLabel(overall),
+    },
+    {
+      num: "02",
+      name: "Hospitality & Warmth",
+      subtitle: "Friendliness, welcoming demeanor & guest care",
+      score: hospScore,
+      starsHtml: renderHtmlStarScore(hospScore),
+      starsText: renderTextStarScore(hospScore),
+      starsPlain: renderStarScore(hospScore),
+      label: getScoreLabel(hospScore),
+    },
+    {
+      num: "03",
+      name: "Professionalism & Competence",
+      subtitle: "Expertise, demeanor & attentiveness",
+      score: profScore,
+      starsHtml: renderHtmlStarScore(profScore),
+      starsText: renderTextStarScore(profScore),
+      starsPlain: renderStarScore(profScore),
+      label: getScoreLabel(profScore),
+    },
+    {
+      num: "04",
+      name: "Helpfulness & Speed",
+      subtitle: "Efficiency, responsiveness & prompt service",
+      score: helpScore,
+      starsHtml: renderHtmlStarScore(helpScore),
+      starsText: renderTextStarScore(helpScore),
+      starsPlain: renderStarScore(helpScore),
+      label: getScoreLabel(helpScore),
+    },
+    {
+      num: "05",
+      name: "Courtesy & Respect",
+      subtitle: "Politeness, dignity & considerate approach",
+      score: courtScore,
+      starsHtml: renderHtmlStarScore(courtScore),
+      starsText: renderTextStarScore(courtScore),
+      starsPlain: renderStarScore(courtScore),
+      label: getScoreLabel(courtScore),
+    },
+    {
+      num: "06",
+      name: qualityDimensionLabel,
+      subtitle: isCulinary
+        ? "Culinary excellence, beverage craft & fresh buffet presentation"
+        : "Precision, operational execution & quality assurance",
+      score: qualScore,
+      starsHtml: renderHtmlStarScore(qualScore),
+      starsText: renderTextStarScore(qualScore),
+      starsPlain: renderStarScore(qualScore),
+      label: getScoreLabel(qualScore),
+    },
+  ];
+
   const feedbackText = (data.comment || data.feedback || data.compliments || "").trim();
+  const isRecommended = data.recommendation === "absolutely" || data.recommendation === "yes";
+
+  const dimensionSectionsHtml = dimensionList
+    .map((dim, idx) => {
+      const isLast = idx === dimensionList.length - 1;
+      return `
+      <!-- SECTION ${dim.num}: ${dim.name} -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background: linear-gradient(135deg, #0c2033 0%, #071524 100%); border: 1.5px solid #d4af37; border-radius: 12px; margin-bottom: 0; box-shadow: 0 4px 14px rgba(0,0,0,0.45); overflow: hidden;">
+        <tr>
+          <td style="padding: 14px 18px 12px 18px;">
+            <!-- Line 1: Number, Dimension Title & Score Pill Badge -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="left" style="vertical-align: middle;">
+                  <span style="display: inline-block; width: 22px; height: 22px; line-height: 22px; text-align: center; background: linear-gradient(135deg, #d4af37, #fef08a, #d4af37); color: #040e17; font-size: 11px; font-weight: 900; border-radius: 6px; margin-right: 8px; vertical-align: middle;">
+                    ${dim.num}
+                  </span>
+                  <span style="font-size: 13px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; color: #ffffff; vertical-align: middle;">
+                    ${dim.name}
+                  </span>
+                </td>
+                <td align="right" style="vertical-align: middle; white-space: nowrap;">
+                  <span style="display: inline-block; padding: 4px 12px; background: linear-gradient(135deg, #102b43, #071724); border: 1.5px solid #d4af37; border-radius: 20px; font-size: 13px; font-weight: 900; color: #fef08a; font-family: Georgia, serif; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                    ${dim.score.toFixed(1)} <span style="font-size: 11px; color: #cbd5e1; font-family: sans-serif; font-weight: 600;">/ 5.0</span>
+                  </span>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Line 2: Subtle Dimension Subtitle -->
+            <div style="margin: 4px 0 0 30px; font-size: 11px; color: #94a3b8;">
+              ${dim.subtitle}
+            </div>
+
+            <!-- Line 3 (Following Line): Visual Star Rating & Status Badge -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #142a3f;">
+              <tr>
+                <td align="left" style="vertical-align: middle;">
+                  <div style="font-size: 22px; line-height: 1; letter-spacing: 4px;">
+                    ${dim.starsHtml}
+                  </div>
+                </td>
+                <td align="right" style="vertical-align: middle; white-space: nowrap;">
+                  <span style="display: inline-block; padding: 3px 10px; background-color: #061c30; border: 1px solid #2563eb; border-radius: 6px; font-size: 11px; font-weight: 800; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px;">
+                    ${dim.label}
+                  </span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      ${
+        !isLast
+          ? `<!-- Following line before next rating (divider) -->
+      <div style="height: 1px; background: linear-gradient(90deg, transparent, rgba(212,175,55,0.4), transparent); margin: 10px 0 10px 0;"></div>`
+          : ""
+      }
+      `;
+    })
+    .join("");
 
   return `
 <!DOCTYPE html>
@@ -231,21 +364,21 @@ function buildHtmlEmail(data: RatingData, ratingId: string): string {
   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #040e17; padding: 24px 12px;">
     <tr>
       <td align="center">
-        <!-- Main Card Container -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 640px; background-color: #081523; border: 2px solid #996515; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.75);">
+        <!-- Main Container Card (Mirroring Website Modal Container) -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 660px; background-color: #081523; border: 2px solid #d4af37; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.85), 0 0 30px rgba(212,175,55,0.2);">
           
           <!-- Golden Shimmer Top Ribbon -->
           <tr>
-            <td style="height: 6px; background: linear-gradient(90deg, #996515, #fef08a, #e5c158, #996515);"></td>
+            <td style="height: 8px; background: linear-gradient(90deg, #996515, #fef08a, #e5c158, #996515);"></td>
           </tr>
 
-          <!-- Header -->
+          <!-- Header: Hotel Identity & Executive Quality Assurance -->
           <tr>
-            <td style="padding: 28px 24px 20px 24px; text-align: center; background: linear-gradient(180deg, #0f2438 0%, #081523 100%); border-bottom: 1px solid #1c354d;">
-              <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase; color: #d4af37;">
+            <td style="padding: 26px 24px 20px 24px; text-align: center; background: linear-gradient(180deg, #0f2438 0%, #081523 100%); border-bottom: 2px solid #1c354d;">
+              <span style="display: inline-block; padding: 4px 14px; background: linear-gradient(90deg, #d4af37, #fef08a, #d4af37); color: #040e17; font-size: 10px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; border-radius: 9999px; margin-bottom: 8px;">
                 ORKA LOTUS BEACH HOTEL • MARMARIS
-              </p>
-              <h1 style="margin: 0; font-size: 22px; font-weight: 900; letter-spacing: 0.5px; color: #ffffff; text-transform: uppercase;">
+              </span>
+              <h1 style="margin: 6px 0 0 0; font-size: 24px; font-weight: 900; letter-spacing: 0.5px; color: #ffffff; text-transform: uppercase; font-family: Georgia, serif;">
                 ORKA LOTUS — NEW GUEST RANKING
               </h1>
               <p style="margin: 6px 0 0 0; font-size: 12px; font-weight: 500; color: #94a3b8;">
@@ -254,122 +387,133 @@ function buildHtmlEmail(data: RatingData, ratingId: string): string {
             </td>
           </tr>
 
-          <!-- SECTION 1: PRIMARY MAIN RATING (FIRST STARS) -->
+          <!-- TARGET IDENTITY BANNER -->
           <tr>
-            <td style="padding: 24px; text-align: center; background: radial-gradient(circle at center, #132a42 0%, #081523 75%); border-bottom: 1px solid #142a3f;">
-              <div style="display: inline-block; padding: 14px 28px; background: linear-gradient(135deg, #11293e, #0b1c2b); border: 2px solid #d4af37; border-radius: 14px; box-shadow: 0 4px 20px rgba(212,175,55,0.25);">
-                <p style="margin: 0 0 4px 0; font-size: 10px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #fef08a;">
-                  PRIMARY OVERALL GUEST RATING
-                </p>
-                <div style="font-size: 42px; font-weight: 900; line-height: 1; color: #ffffff; font-family: Georgia, serif; text-shadow: 0 2px 8px rgba(0,0,0,0.5);">
-                  ${overall.toFixed(1)} <span style="font-size: 20px; color: #d4af37; font-weight: 700;">/ 5.0</span>
-                </div>
-                <!-- First Stars Shown For Main Rating -->
-                <div style="margin-top: 8px; font-size: 26px; color: #fbbf24; letter-spacing: 4px; text-shadow: 0 0 10px rgba(251,191,36,0.6);">
-                  ${firstStars}
+            <td style="padding: 20px 24px 16px 24px; background-color: #071421; border-bottom: 1px solid #142a3f;">
+              <div style="background: linear-gradient(135deg, #0c2235, #081726); border: 1.5px solid #d4af37; border-radius: 14px; padding: 16px 20px;">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td align="left" style="vertical-align: middle;">
+                      <span style="display: inline-block; padding: 3px 10px; background: linear-gradient(90deg, #d4af37, #fef08a, #d4af37); color: #040e17; font-size: 10px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; border-radius: 9999px; margin-bottom: 4px;">
+                        ${data.categoryName || "General Service"}
+                      </span>
+                      <h2 style="margin: 4px 0 0 0; font-size: 18px; font-weight: 900; color: #ffffff; font-family: Georgia, serif;">
+                        ${targetName}
+                      </h2>
+                      <div style="margin-top: 3px; font-size: 11px; color: #94a3b8;">
+                        ${data.sectionName || "Hotel Services"} • Verified Service Experience
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #163654; font-size: 12px; color: #cbd5e1; line-height: 1.5;">
+                  ${defaultExperienceDesc}
                 </div>
               </div>
-              <p style="margin: 16px 0 0 0; font-size: 19px; font-weight: 800; color: #ffffff;">
-                ${targetName}
-              </p>
-              <p style="margin: 4px 0 0 0; font-size: 12px; color: #cbd5e1;">
-                ${data.sectionName || "Hotel Services"} • ${data.categoryName || "General Service"}
-              </p>
             </td>
           </tr>
 
-          <!-- SECTION 2: GUEST & SUBMISSION DETAILS -->
+          <!-- SECTION 1: PRIMARY OVERALL GUEST RATING (FIRST STARS) -->
+          <tr>
+            <td style="padding: 24px; text-align: center; background: radial-gradient(circle at center, #132a42 0%, #081523 75%); border-bottom: 1px solid #142a3f;">
+              <div style="display: inline-block; padding: 16px 32px; background: linear-gradient(135deg, #11293e, #0b1c2b); border: 2px solid #d4af37; border-radius: 16px; box-shadow: 0 6px 24px rgba(212,175,55,0.3);">
+                <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; color: #fef08a;">
+                  PRIMARY OVERALL GUEST RATING
+                </p>
+                <div style="font-size: 46px; font-weight: 900; line-height: 1; color: #ffffff; font-family: Georgia, serif; text-shadow: 0 2px 10px rgba(0,0,0,0.6);">
+                  ${overall.toFixed(1)} <span style="font-size: 20px; color: #d4af37; font-weight: 700;">/ 5.0</span>
+                </div>
+                <!-- Following line: Large prominent first stars -->
+                <div style="margin-top: 10px; font-size: 28px; color: #fbbf24; letter-spacing: 6px; text-shadow: 0 0 14px rgba(251,191,36,0.7); line-height: 1;">
+                  ${firstStars}
+                </div>
+                <div style="margin-top: 10px;">
+                  <span style="display: inline-block; padding: 4px 14px; background: linear-gradient(90deg, #d4af37, #fef08a, #d4af37); color: #040e17; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; border-radius: 9999px;">
+                    ★ ${overall.toFixed(1)} — ${getScoreLabel(overall)}
+                  </span>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- SECTION 2: RECOMMENDATION STATUS -->
+          <tr>
+            <td style="padding: 16px 24px; background-color: #071421; border-bottom: 1px solid #142a3f;">
+              <div style="background-color: ${isRecommended ? "#062b1e" : "#2a1b05"}; border: 1.5px solid ${isRecommended ? "#059669" : "#d97706"}; border-radius: 12px; padding: 12px 16px; text-align: center;">
+                <span style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: ${isRecommended ? "#a7f3d0" : "#fde68a"};">
+                  WOULD YOU RECOMMEND THIS EXPERIENCE?
+                </span>
+                <div style="margin-top: 4px; font-size: 14px; font-weight: 900; color: ${isRecommended ? "#34d399" : "#f59e0b"};">
+                  ${getRecommendationLabel(data.recommendation)}
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- SECTION 3: GUEST & SUBMISSION DETAILS -->
           <tr>
             <td style="padding: 20px 24px 16px 24px;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1px solid #1c354d; border-radius: 12px; overflow: hidden;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1.5px solid #1c354d; border-radius: 14px; overflow: hidden;">
                 <tr>
-                  <td colspan="2" style="padding: 12px 16px; background-color: #10263c; border-bottom: 1px solid #1c354d; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
+                  <td colspan="2" style="padding: 12px 18px; background: linear-gradient(135deg, #10263c, #0b1a29); border-bottom: 1px solid #1c354d; font-size: 11px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
                     GUEST & SUBMISSION DETAILS
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8; width: 38%; border-bottom: 1px solid #142a3f;">Guest Name:</td>
-                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${guestName}</td>
+                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; width: 38%; border-bottom: 1px solid #142a3f;">Guest Name:</td>
+                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${guestName}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Room Number:</td>
-                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${roomNumber}</td>
+                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Room Number:</td>
+                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${roomNumber}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Recommendation:</td>
-                  <td style="padding: 10px 16px; font-size: 12px; font-weight: 700; color: #34d399; border-bottom: 1px solid #142a3f;">${getRecommendationLabel(data.recommendation)}</td>
+                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Submission Date & Time:</td>
+                  <td style="padding: 11px 18px; font-size: 12px; font-weight: 600; color: #ffffff; border-bottom: 1px solid #142a3f;">${formattedDate}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Submission Date & Time:</td>
-                  <td style="padding: 10px 16px; font-size: 12px; font-weight: 600; color: #ffffff; border-bottom: 1px solid #142a3f;">${formattedDate}</td>
+                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Rating ID:</td>
+                  <td style="padding: 11px 18px; font-size: 12px; font-family: monospace; color: #d4af37; border-bottom: 1px solid #142a3f;">${ratingId}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8;">Rating ID:</td>
-                  <td style="padding: 10px 16px; font-size: 11px; font-family: monospace; color: #d4af37;">${ratingId}</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- SECTION 3: DETAILED CULINARY & SERVICES STAR RANKING (SECONDARY STARS) -->
-          <tr>
-            <td style="padding: 0 24px 20px 24px;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1px solid ${hasDetailed ? "#d4af37" : "#1c354d"}; border-radius: 12px; overflow: hidden;">
-                <tr>
-                  <td colspan="3" style="padding: 12px 16px; background-color: #10263c; border-bottom: 1px solid #1c354d;">
-                    <div style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
-                      DETAILED CULINARY & SERVICES STAR RANKING (SECONDARY STARS)
-                    </div>
-                    <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
-                      ${hasDetailed ? "✓ In-depth optional criteria rated by guest with secondary stars" : "• Service & experience criteria rated in harmony with main rating"}
-                    </div>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Overall Experience</td>
-                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${overall.toFixed(1)} / 5.0</td>
-                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; width: 100px; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${firstStars}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Hospitality & Warmth</td>
-                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${hospScore.toFixed(1)} / 5.0</td>
-                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; width: 100px; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${hospStars}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Professionalism & Competence</td>
-                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${profScore.toFixed(1)} / 5.0</td>
-                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${profStars}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Helpfulness & Speed</td>
-                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${helpScore.toFixed(1)} / 5.0</td>
-                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${helpStars}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Courtesy & Respect</td>
-                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${courtScore.toFixed(1)} / 5.0</td>
-                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${courtStars}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1;">${qualityDimensionLabel}</td>
-                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right;">${qualScore.toFixed(1)} / 5.0</td>
-                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; letter-spacing: 1px;">${qualStars}</td>
+                  <td style="padding: 11px 18px; font-size: 12px; color: #94a3b8;">Executive Audit Status:</td>
+                  <td style="padding: 11px 18px; font-size: 12px; font-weight: 700; color: #34d399;">✓ Official Executive Audit • Verified Guest Evaluation</td>
                 </tr>
               </table>
             </td>
           </tr>
 
-          <!-- SECTION 4: GUEST FEEDBACK & COMPLIMENTS -->
+          <!-- SECTION 4: DETAILED CULINARY & SERVICES STAR RANKING (UNCOMPACTED) -->
+          <tr>
+            <td style="padding: 8px 24px 20px 24px;">
+              <!-- Section Category Header -->
+              <div style="padding: 12px 18px; background: linear-gradient(135deg, #10263c, #0b1a29); border: 1.5px solid #d4af37; border-bottom: none; border-radius: 14px 14px 0 0;">
+                <div style="font-size: 12px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
+                  ⭐ DETAILED EXPERIENCE & SERVICE DIMENSIONS
+                </div>
+                <div style="font-size: 11px; color: #94a3b8; margin-top: 3px;">
+                  Listed section by section with visual star rating and score criteria (similar to website experience drawer)
+                </div>
+              </div>
+
+              <!-- Uncompacted Dimension List -->
+              <div style="background-color: #071421; border: 1.5px solid #d4af37; border-radius: 0 0 14px 14px; padding: 16px 16px 16px 16px;">
+                ${dimensionSectionsHtml}
+              </div>
+            </td>
+          </tr>
+
+          <!-- SECTION 5: GUEST FEEDBACK & COMPLIMENTS -->
           <tr>
             <td style="padding: 0 24px 20px 24px;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1px solid #d4af37; border-radius: 12px; overflow: hidden;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1.5px solid #d4af37; border-radius: 14px; overflow: hidden;">
                 <tr>
-                  <td style="padding: 12px 16px; background-color: #10263c; border-bottom: 1px solid #1c354d; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
+                  <td style="padding: 12px 18px; background: linear-gradient(135deg, #10263c, #0b1a29); border-bottom: 1px solid #1c354d; font-size: 11px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
                     GUEST FEEDBACK & COMPLIMENTS
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding: 16px; font-size: 13px; line-height: 1.6; color: ${feedbackText ? "#ffffff" : "#94a3b8"}; font-style: ${feedbackText ? "normal" : "italic"};">
+                  <td style="padding: 18px; font-size: 13px; line-height: 1.7; color: ${feedbackText ? "#ffffff" : "#94a3b8"}; font-style: ${feedbackText ? "normal" : "italic"};">
                     ${feedbackText ? `“${feedbackText}”` : "No written comment or feedback was provided with this submission."}
                   </td>
                 </tr>
@@ -377,10 +521,10 @@ function buildHtmlEmail(data: RatingData, ratingId: string): string {
             </td>
           </tr>
 
-          <!-- SECTION 5: ACTION BUTTON -->
+          <!-- SECTION 6: EXECUTIVE ACTION BUTTON -->
           <tr>
             <td style="padding: 0 24px 24px 24px; text-align: center;">
-              <a href="${rtdbConsoleUrl}" target="_blank" style="display: inline-block; padding: 12px 24px; background: linear-gradient(135deg, #d4af37, #fef08a, #d4af37); color: #040e17; text-decoration: none; font-size: 12px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; border-radius: 10px; box-shadow: 0 4px 14px rgba(212,175,55,0.4);">
+              <a href="${rtdbConsoleUrl}" target="_blank" style="display: inline-block; padding: 14px 28px; background: linear-gradient(135deg, #d4af37, #fef08a, #d4af37); color: #040e17; text-decoration: none; font-size: 12px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; border-radius: 10px; box-shadow: 0 4px 16px rgba(212,175,55,0.45);">
                 VIEW IN FIREBASE REALTIME DATABASE →
               </a>
             </td>
@@ -388,8 +532,8 @@ function buildHtmlEmail(data: RatingData, ratingId: string): string {
 
           <!-- FOOTER -->
           <tr>
-            <td style="padding: 18px 24px; background-color: #06111d; border-top: 1px solid #142a3f; text-align: center; font-size: 11px; color: #64748b; line-height: 1.5;">
-              <p style="margin: 0;">
+            <td style="padding: 18px 24px; background-color: #06111d; border-top: 1px solid #142a3f; text-align: center; font-size: 11px; color: #64748b; line-height: 1.6;">
+              <p style="margin: 0; font-weight: 600; color: #94a3b8;">
                 Orka Lotus Beach Hotel Quality Assurance System • Automated Realtime Notification
               </p>
               <p style="margin: 4px 0 0 0; font-size: 10px; color: #475569;">
@@ -432,12 +576,6 @@ function buildTextEmail(data: RatingData, ratingId: string): string {
   const courtScore = Number(data.courtesyRating ?? overall);
   const qualScore = Number(data.qualityRating ?? overall);
 
-  const hospStars = data.hospitalityStars || renderStarScore(hospScore);
-  const profStars = data.professionalismStars || renderStarScore(profScore);
-  const helpStars = data.helpfulnessStars || renderStarScore(helpScore);
-  const courtStars = data.courtesyStars || renderStarScore(courtScore);
-  const qualStars = data.qualityStars || renderStarScore(qualScore);
-
   const isCulinary =
     data.categoryName === "Food & Beverage" ||
     data.category === "culinary_fb" ||
@@ -450,6 +588,15 @@ function buildTextEmail(data: RatingData, ratingId: string): string {
     ? "Culinary & Service Quality"
     : "Service & Execution Quality";
 
+  const dimensionList = [
+    { num: "01", name: "Overall Guest Experience", score: overall },
+    { num: "02", name: "Hospitality & Warmth", score: hospScore },
+    { num: "03", name: "Professionalism & Competence", score: profScore },
+    { num: "04", name: "Helpfulness & Speed", score: helpScore },
+    { num: "05", name: "Courtesy & Respect", score: courtScore },
+    { num: "06", name: qualityDimensionLabel, score: qualScore },
+  ];
+
   const feedbackText = (data.comment || data.feedback || data.compliments || "").trim();
 
   return `
@@ -459,30 +606,38 @@ Target: ${targetName}
 Section: ${data.sectionName || "Hotel Services"}
 Category: ${data.categoryName || "General Service"}
 
-1. PRIMARY GUEST RATING (FIRST STARS)
+1. PRIMARY GUEST RATING
 -----------------------------------------------------
-Score: ${overall.toFixed(1)} / 5.0
-First Stars: ${firstStars}
+Score: ${overall.toFixed(1)} / 5.0 — ${getScoreLabel(overall)}
+Stars: ${firstStars} (★★★★★)
 
-2. GUEST & SUBMISSION DETAILS
+2. RECOMMENDATION STATUS
+-----------------------------------------------------
+Recommendation: ${getRecommendationLabel(data.recommendation)}
+
+3. GUEST & SUBMISSION DETAILS
 -----------------------------------------------------
 Guest Name: ${guestName}
 Room Number: ${roomNumber}
-Recommendation: ${getRecommendationLabel(data.recommendation)}
 Submission Time: ${data.createdAt || new Date().toISOString()}
 Rating ID: ${ratingId}
+Audit Status: Verified Guest Evaluation
 
-3. DETAILED CULINARY & SERVICES STAR RANKING (SECONDARY STARS)
+4. DETAILED EXPERIENCE & SERVICE RATINGS
 -----------------------------------------------------
-${hasDetailed ? "✓ In-depth optional criteria rated by guest with secondary stars:" : "• Service & experience criteria rated in harmony with main rating:"}
-- Overall Experience: ${overall.toFixed(1)} / 5.0 ${firstStars}
-- Hospitality & Warmth: ${hospScore.toFixed(1)} / 5.0 ${hospStars}
-- Professionalism & Competence: ${profScore.toFixed(1)} / 5.0 ${profStars}
-- Helpfulness & Speed: ${helpScore.toFixed(1)} / 5.0 ${helpStars}
-- Courtesy & Respect: ${courtScore.toFixed(1)} / 5.0 ${courtStars}
-- ${qualityDimensionLabel}: ${qualScore.toFixed(1)} / 5.0 ${qualStars}
+(Listed section by section with visual star rating and score)
 
-4. GUEST FEEDBACK & COMPLIMENTS
+${dimensionList
+  .map(
+    (dim) =>
+      `${dim.num}. ${dim.name.toUpperCase()}\n` +
+      `   Score: ${dim.score.toFixed(1)} / 5.0 — ${getScoreLabel(dim.score)}\n` +
+      `   Stars: ${renderTextStarScore(dim.score)} (${renderStarScore(dim.score)})\n` +
+      `   --------------------------------------------------`
+  )
+  .join("\n\n")}
+
+5. GUEST FEEDBACK & COMPLIMENTS
 -----------------------------------------------------
 ${feedbackText ? `"${feedbackText}"` : "(No written feedback or compliments provided)"}
 

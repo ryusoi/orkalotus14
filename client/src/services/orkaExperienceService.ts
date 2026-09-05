@@ -273,19 +273,37 @@ export function buildDetailedDimensionsTextBlock(options: {
     hasDetailed = false,
   } = options;
 
+  const getLabel = (s: number) => {
+    if (s >= 4.75) return "Exceptional";
+    if (s >= 3.75) return "Very Good";
+    if (s >= 2.75) return "Good";
+    if (s >= 1.75) return "Fair / Needs Attention";
+    return "Poor / Urgent Review";
+  };
+
+  const sections = [
+    { num: "01", name: "OVERALL GUEST EXPERIENCE", score: overallScore },
+    { num: "02", name: "HOSPITALITY & WARMTH", score: hospScore },
+    { num: "03", name: "PROFESSIONALISM & COMPETENCE", score: profScore },
+    { num: "04", name: "HELPFULNESS & SPEED", score: helpScore },
+    { num: "05", name: "COURTESY & RESPECT", score: courtScore },
+    { num: "06", name: qualityLabel.toUpperCase(), score: qualScore },
+  ];
+
   return [
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-    "⭐ DETAILED EXPERIENCE & SERVICE DIMENSIONS ⭐",
+    "⭐ DETAILED EXPERIENCE & SERVICE RATINGS ⭐",
     hasDetailed
       ? "(✓ Rated individually with secondary stars by guest)"
-      : "(• Service & experience criteria in harmony with main rating)",
+      : "(• Service & experience criteria evaluated in harmony with main rating)",
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-    `⭐ Overall Experience: ${renderEmojiStars(overallScore)} (${overallScore.toFixed(1)} / 5.0)`,
-    `⭐ Hospitality & Warmth: ${renderEmojiStars(hospScore)} (${hospScore.toFixed(1)} / 5.0)`,
-    `⭐ Professionalism & Competence: ${renderEmojiStars(profScore)} (${profScore.toFixed(1)} / 5.0)`,
-    `⭐ Helpfulness & Speed: ${renderEmojiStars(helpScore)} (${helpScore.toFixed(1)} / 5.0)`,
-    `⭐ Courtesy & Respect: ${renderEmojiStars(courtScore)} (${courtScore.toFixed(1)} / 5.0)`,
-    `⭐ ${qualityLabel}: ${renderEmojiStars(qualScore)} (${qualScore.toFixed(1)} / 5.0)`,
+    ...sections.map(
+      (sec) =>
+        `${sec.num}. ${sec.name}\n` +
+        `   Score: ${sec.score.toFixed(1)} / 5.0 — ${getLabel(sec.score)}\n` +
+        `   Stars: ${renderEmojiStars(sec.score)} (${renderStarString(sec.score)})\n` +
+        `   --------------------------------------------------`
+    ),
   ].join("\n");
 }
 
