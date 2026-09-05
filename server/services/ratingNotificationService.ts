@@ -226,19 +226,48 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
       const overall = Number(rating.overallRating || rating.rating) || 5.0;
       const targetName = rating.targetName || rating.targetId || "Hotel Experience";
       const categoryName = rating.categoryName || rating.category || "General Service";
-      const guestName =
-        rating.guestName ||
-        (rating.guestDisplayName && !rating.anonymous
-          ? rating.guestDisplayName
-          : rating.anonymous
-          ? "Anonymous Guest"
-          : "Verified Guest");
-      const roomNumber = rating.roomNumber || "Not provided";
+      const sectionName = rating.sectionName || rating.section || "Hotel Experience";
       const recommendation = rating.recommendation || "yes";
-      const comment = rating.comment || "";
+      const comment = (rating.comment || rating.feedback || rating.compliments || "").trim();
       const submittedAt = rating.createdAt || rating.submittedAt || nowIso;
 
-      const stars =
+      // Cleanly parse guest name and room number
+      let guestName = (rating.guestName || "").trim();
+      let roomNumber = (rating.roomNumber || "").trim();
+      const rawDisplayName = (rating.guestDisplayName || "").trim();
+
+      if (!guestName || guestName === "Verified Guest") {
+        if (rawDisplayName) {
+          const roomMatch =
+            rawDisplayName.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i) ||
+            rawDisplayName.match(/\b([0-9]{3,4}[a-zA-Z]?)\b/);
+          if (roomMatch) {
+            if (!roomNumber || roomNumber === "Not provided" || roomNumber === "Not specified") {
+              roomNumber = roomMatch[1];
+            }
+            const stripped = rawDisplayName
+              .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
+              .replace(new RegExp(`\\b${roomMatch[1]}\\b`, "g"), "")
+              .replace(/^[\s\-–—,./|:]+|[\s\-–—,./|:]+$/g, "")
+              .trim();
+            if (stripped) {
+              guestName = stripped;
+            }
+          } else {
+            guestName = rawDisplayName;
+          }
+        }
+      }
+
+      if (!guestName) {
+        guestName = rating.anonymous ? "Anonymous Guest" : "Verified Guest";
+      }
+      if (!roomNumber || roomNumber === "Not provided") {
+        roomNumber = "Not specified";
+      }
+
+      // First stars for main rating
+      const firstStars =
         "★".repeat(Math.min(5, Math.max(1, Math.round(overall)))) +
         "☆".repeat(Math.max(0, 5 - Math.min(5, Math.max(1, Math.round(overall)))));
 
@@ -251,10 +280,344 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
             day: "numeric",
             hour: "2-digit",
             minute: "2-digit",
-          }) + " (Marmaris)"
+          }) + " (Marmaris, TR)"
         : nowIso;
 
       const subject = `[ORKA LOTUS] New Guest Ranking: ${targetName} • Overall ${overall.toFixed(1)}/5.0 ★`;
+
+      // Secondary stars for detailed culinary & services dimensions
+      const hasDetailed = Boolean(
+        rating.hasDetailedRatings ||
+        rating.detailedRatingsGiven ||
+        (rating.hospitalityRating && rating.hospitalityRating !== overall) ||
+        (rating.professionalismRating && rating.professionalismRating !== overall) ||
+        (rating.helpfulnessRating && rating.helpfulnessRating !== overall) ||
+        (rating.courtesyRating && rating.courtesyRating !== overall) ||
+        (rating.qualityRating && rating.qualityRating !== overall)
+      );
+
+      const hospScore = Number(rating.hospitalityRating ?? rating.hospitality ?? overall);
+      const profScore = Number(rating.professionalismRating ?? rating.professionalism ?? overall);
+      const helpScore = Number(rating.helpfulnessRating ?? rating.helpfulness ?? overall);
+      const courtScore = Number(rating.courtesyRating ?? rating.courtesy ?? overall);
+      const qualScore = Number(rating.qualityRating ?? rating.quality ?? overall);
+
+      const renderStarHelper = (score: number) => {
+        const rounded = Math.min(5, Math.max(1, Math.round(score)));
+        return "★".repeat(rounded) + "☆".repeat(Math.max(0, 5 - rounded));
+      };
+
+      const renderEmojiStars = (score: number) => {
+        const rounded = Math.min(5, Math.max(1, Math.round(score)));
+        return "⭐".repeat(rounded);
+      };
+
+      const hospStars = rating.hospitalityStars || renderStarHelper(hospScore);
+      const profStars = rating.professionalismStars || renderStarHelper(profScore);
+      const helpStars = rating.helpfulnessStars || renderStarHelper(helpScore);
+      const courtStars = rating.courtesyStars || renderStarHelper(courtScore);
+      const qualStars = rating.qualityStars || renderStarHelper(qualScore);
+
+      const isCulinary =
+        categoryName === "Food & Beverage" ||
+        String(rating.category || "").includes("food") ||
+        String(rating.targetId || "").includes("food") ||
+        String(rating.targetId || "").includes("bar") ||
+        String(rating.targetId || "").includes("chef") ||
+        String(rating.targetId || "").includes("restaurant");
+
+      const qualityDimensionLabel = isCulinary
+        ? "Culinary & Service Quality"
+        : "Service & Execution Quality";
+
+      const detailedDimensions = rating.detailedDimensions || {
+        overall: { label: "Overall Experience", score: overall, stars: firstStars },
+        hospitality: { label: "Hospitality & Warmth", score: hospScore, stars: hospStars },
+        professionalism: { label: "Professionalism & Competence", score: profScore, stars: profStars },
+        helpfulness: { label: "Helpfulness & Speed", score: helpScore, stars: helpStars },
+        courtesy: { label: "Courtesy & Respect", score: courtScore, stars: courtStars },
+        quality: { label: qualityDimensionLabel, score: qualScore, stars: qualStars },
+      };
+
+      const secondaryStarsSummary = hasDetailed
+        ? `Overall: ${firstStars} (${overall.toFixed(1)}/5.0) • Hospitality: ${hospStars} (${hospScore.toFixed(1)}/5.0) • Professionalism: ${profStars} (${profScore.toFixed(1)}/5.0) • Helpfulness: ${helpStars} (${helpScore.toFixed(1)}/5.0) • Courtesy: ${courtStars} (${courtScore.toFixed(1)}/5.0) • ${qualityDimensionLabel}: ${qualStars} (${qualScore.toFixed(1)}/5.0)`
+        : `Overall: ${firstStars} (${overall.toFixed(1)}/5.0) • Hospitality: ${hospStars} • Professionalism: ${profStars} • Helpfulness: ${helpStars} • Courtesy: ${courtStars} • ${qualityDimensionLabel}: ${qualStars}`;
+
+      const detailedDimensionsBlock = [
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "⭐ DETAILED EXPERIENCE & SERVICE DIMENSIONS ⭐",
+        hasDetailed
+          ? "(✓ Rated individually with secondary stars by guest)"
+          : "(• Service & experience criteria evaluated with main rating)",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        `⭐ Overall Experience: ${renderEmojiStars(overall)} (${overall.toFixed(1)} / 5.0)`,
+        `⭐ Hospitality & Warmth: ${renderEmojiStars(hospScore)} (${hospScore.toFixed(1)} / 5.0)`,
+        `⭐ Professionalism & Competence: ${renderEmojiStars(profScore)} (${profScore.toFixed(1)} / 5.0)`,
+        `⭐ Helpfulness & Speed: ${renderEmojiStars(helpScore)} (${helpScore.toFixed(1)} / 5.0)`,
+        `⭐ Courtesy & Respect: ${renderEmojiStars(courtScore)} (${courtScore.toFixed(1)} / 5.0)`,
+        `⭐ ${qualityDimensionLabel}: ${renderEmojiStars(qualScore)} (${qualScore.toFixed(1)} / 5.0)`,
+      ].join("\n");
+
+      const rawUserComment = String(
+        rating.rawComment ||
+        rating.userComment ||
+        rating.comment ||
+        rating.feedback ||
+        rating.compliments ||
+        ""
+      ).trim();
+
+      const cleanRawUserComment = rawUserComment.includes("⭐ DETAILED EXPERIENCE & SERVICE DIMENSIONS ⭐")
+        ? rawUserComment.split("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")[0].trim()
+        : rawUserComment;
+
+      const formattedCommentForAppsScript = cleanRawUserComment && cleanRawUserComment !== "No written feedback provided."
+        ? `${cleanRawUserComment}\n\n${detailedDimensionsBlock}`
+        : detailedDimensionsBlock;
+
+      const getRecLabel = (rec?: string) => {
+        switch (rec) {
+          case "absolutely":
+            return "✓ Absolutely Recommended (100% Enthusiastic)";
+          case "yes":
+            return "✓ Yes, Recommended";
+          case "maybe":
+            return "• Neutral / Maybe";
+          case "probably_not":
+            return "✗ Could Be Better / Needs Attention";
+          default:
+            return rec || "Not specified";
+        }
+      };
+
+      const rtdbConsoleUrl = `https://console.firebase.google.com/project/orka-lotus-beach-marinaryu/database/orka-lotus-beach-marinaryu-default-rtdb/data/ratings/${ratingId}`;
+
+      // Build Luxury HTML Email
+      const htmlBody = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ORKA LOTUS — NEW GUEST RANKING</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #040e17; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f8fafc;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #040e17; padding: 24px 12px;">
+    <tr>
+      <td align="center">
+        <!-- Main Container Card -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 640px; background-color: #081523; border: 2px solid #996515; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.75);">
+          
+          <!-- Golden Shimmer Ribbon -->
+          <tr>
+            <td style="height: 6px; background: linear-gradient(90deg, #996515, #fef08a, #e5c158, #996515);"></td>
+          </tr>
+
+          <!-- Header -->
+          <tr>
+            <td style="padding: 26px 24px 20px 24px; text-align: center; background: linear-gradient(180deg, #0f2438 0%, #081523 100%); border-bottom: 1px solid #1c354d;">
+              <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase; color: #d4af37;">
+                ORKA LOTUS BEACH HOTEL • MARMARIS
+              </p>
+              <h1 style="margin: 0; font-size: 22px; font-weight: 900; letter-spacing: 0.5px; color: #ffffff; text-transform: uppercase;">
+                ORKA LOTUS — NEW GUEST RANKING
+              </h1>
+              <p style="margin: 6px 0 0 0; font-size: 12px; font-weight: 500; color: #94a3b8;">
+                Executive Quality Assurance & Guest Experience Directorate
+              </p>
+            </td>
+          </tr>
+
+          <!-- SECTION 1: PRIMARY MAIN RATING (FIRST STARS) -->
+          <tr>
+            <td style="padding: 24px; text-align: center; background: radial-gradient(circle at center, #132a42 0%, #081523 75%); border-bottom: 1px solid #142a3f;">
+              <div style="display: inline-block; padding: 14px 28px; background: linear-gradient(135deg, #11293e, #0b1c2b); border: 2px solid #d4af37; border-radius: 14px; box-shadow: 0 4px 20px rgba(212,175,55,0.25);">
+                <p style="margin: 0 0 4px 0; font-size: 10px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #fef08a;">
+                  PRIMARY OVERALL GUEST RATING
+                </p>
+                <div style="font-size: 42px; font-weight: 900; line-height: 1; color: #ffffff; font-family: Georgia, serif; text-shadow: 0 2px 8px rgba(0,0,0,0.5);">
+                  ${overall.toFixed(1)} <span style="font-size: 20px; color: #d4af37; font-weight: 700;">/ 5.0</span>
+                </div>
+                <!-- First Stars Shown For Main Rating -->
+                <div style="margin-top: 8px; font-size: 26px; color: #fbbf24; letter-spacing: 4px; text-shadow: 0 0 10px rgba(251,191,36,0.6);">
+                  ${firstStars}
+                </div>
+              </div>
+              <p style="margin: 16px 0 0 0; font-size: 19px; font-weight: 800; color: #ffffff;">
+                ${targetName}
+              </p>
+              <p style="margin: 4px 0 0 0; font-size: 12px; color: #cbd5e1;">
+                ${sectionName} • ${categoryName}
+              </p>
+            </td>
+          </tr>
+
+          <!-- SECTION 2: GUEST & SUBMISSION DETAILS -->
+          <tr>
+            <td style="padding: 20px 24px 16px 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1px solid #1c354d; border-radius: 12px; overflow: hidden;">
+                <tr>
+                  <td colspan="2" style="padding: 12px 16px; background-color: #10263c; border-bottom: 1px solid #1c354d; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
+                    GUEST & SUBMISSION DETAILS
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8; width: 38%; border-bottom: 1px solid #142a3f;">Guest Name:</td>
+                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${guestName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Room Number:</td>
+                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #142a3f;">${roomNumber}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Recommendation:</td>
+                  <td style="padding: 10px 16px; font-size: 12px; font-weight: 700; color: #34d399; border-bottom: 1px solid #142a3f;">${getRecLabel(recommendation)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #142a3f;">Submission Date & Time:</td>
+                  <td style="padding: 10px 16px; font-size: 12px; font-weight: 600; color: #ffffff; border-bottom: 1px solid #142a3f;">${formattedDate}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #94a3b8;">Rating ID:</td>
+                  <td style="padding: 10px 16px; font-size: 11px; font-family: monospace; color: #d4af37;">${ratingId}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- SECTION 3: DETAILED CULINARY & SERVICES STAR RANKING (SECONDARY STARS) -->
+          <tr>
+            <td style="padding: 0 24px 20px 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1px solid ${hasDetailed ? "#d4af37" : "#1c354d"}; border-radius: 12px; overflow: hidden;">
+                <tr>
+                  <td colspan="3" style="padding: 12px 16px; background-color: #10263c; border-bottom: 1px solid #1c354d;">
+                    <div style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
+                      DETAILED CULINARY & SERVICES STAR RANKING (SECONDARY STARS)
+                    </div>
+                    <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                      ${hasDetailed ? "✓ In-depth optional criteria rated by guest with secondary stars" : "• Service & experience criteria rated in harmony with main rating"}
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Overall Experience</td>
+                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${overall.toFixed(1)} / 5.0</td>
+                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; width: 100px; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${firstStars}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Hospitality & Warmth</td>
+                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${hospScore.toFixed(1)} / 5.0</td>
+                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; width: 100px; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${hospStars}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Professionalism & Competence</td>
+                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${profScore.toFixed(1)} / 5.0</td>
+                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${profStars}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Helpfulness & Speed</td>
+                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${helpScore.toFixed(1)} / 5.0</td>
+                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${helpStars}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1; border-bottom: 1px solid #142a3f;">Courtesy & Respect</td>
+                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right; border-bottom: 1px solid #142a3f;">${courtScore.toFixed(1)} / 5.0</td>
+                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; border-bottom: 1px solid #142a3f; letter-spacing: 1px;">${courtStars}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 16px; font-size: 12px; color: #cbd5e1;">${qualityDimensionLabel}</td>
+                  <td style="padding: 10px 16px; font-size: 13px; font-weight: 700; color: #ffffff; text-align: right;">${qualScore.toFixed(1)} / 5.0</td>
+                  <td style="padding: 10px 16px; font-size: 13px; color: #fbbf24; text-align: right; letter-spacing: 1px;">${qualStars}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- SECTION 4: GUEST FEEDBACK & COMPLIMENTS -->
+          <tr>
+            <td style="padding: 0 24px 20px 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #0b1a29; border: 1px solid #d4af37; border-radius: 12px; overflow: hidden;">
+                <tr>
+                  <td style="padding: 12px 16px; background-color: #10263c; border-bottom: 1px solid #1c354d; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #fef08a;">
+                    GUEST FEEDBACK & COMPLIMENTS
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 16px; font-size: 13px; line-height: 1.6; color: ${comment ? "#ffffff" : "#94a3b8"}; font-style: ${comment ? "normal" : "italic"};">
+                    ${comment ? `“${comment}”` : "No written comment or feedback was provided with this submission."}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- SECTION 5: ACTION BUTTON -->
+          <tr>
+            <td style="padding: 0 24px 24px 24px; text-align: center;">
+              <a href="${rtdbConsoleUrl}" target="_blank" style="display: inline-block; padding: 12px 24px; background: linear-gradient(135deg, #d4af37, #fef08a, #d4af37); color: #040e17; text-decoration: none; font-size: 12px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; border-radius: 10px; box-shadow: 0 4px 14px rgba(212,175,55,0.4);">
+                VIEW IN FIREBASE REALTIME DATABASE →
+              </a>
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="padding: 18px 24px; background-color: #06111d; border-top: 1px solid #142a3f; text-align: center; font-size: 11px; color: #64748b; line-height: 1.5;">
+              <p style="margin: 0;">
+                Orka Lotus Beach Hotel Quality Assurance System • Automated Executive Notification
+              </p>
+              <p style="margin: 4px 0 0 0; font-size: 10px; color: #475569;">
+                Marmaris / Icmeler, Turkey • Database Instance: orka-lotus-beach-marinaryu-default-rtdb
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+      `.trim();
+
+      // Plain text fallback
+      const textBody = `
+ORKA LOTUS BEACH HOTEL — NEW GUEST RANKING
+=====================================================
+
+1. PRIMARY GUEST RATING (FIRST STARS)
+-----------------------------------------------------
+Target: ${targetName}
+Category: ${categoryName} (${sectionName})
+Score: ${overall.toFixed(1)} / 5.0
+First Stars: ${firstStars}
+
+2. DETAILED CULINARY & SERVICES STAR RANKING (SECONDARY STARS)
+-----------------------------------------------------
+${secondaryStarsSummary}
+- Overall Experience: ${overall.toFixed(1)}/5.0 ${firstStars}
+- Hospitality & Warmth: ${hospScore.toFixed(1)}/5.0 ${hospStars}
+- Professionalism & Competence: ${profScore.toFixed(1)}/5.0 ${profStars}
+- Helpfulness & Speed: ${helpScore.toFixed(1)}/5.0 ${helpStars}
+- Courtesy & Respect: ${courtScore.toFixed(1)}/5.0 ${courtStars}
+- ${qualityDimensionLabel}: ${qualScore.toFixed(1)}/5.0 ${qualStars}
+
+3. GUEST & SUBMISSION DETAILS
+-----------------------------------------------------
+Guest Name: ${guestName}
+Room Number: ${roomNumber}
+Recommendation: ${getRecLabel(recommendation)}
+Submission Time: ${formattedDate}
+Rating ID: ${ratingId}
+
+4. GUEST FEEDBACK & COMPLIMENTS
+-----------------------------------------------------
+${cleanRawUserComment ? `"${cleanRawUserComment}"` : "No written feedback was provided."}
+
+=====================================================
+Firebase Console: ${rtdbConsoleUrl}
+Orka Lotus Beach Hotel Quality Assurance Directorate
+      `.trim();
 
       // Comprehensive payload matching exact working Google Apps Script expectations
       // Comma-separated recipients sent as single server-side string:
@@ -265,8 +628,13 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
         targetName,
         rating: overall,
         recommendation,
-        comment,
+        comment: formattedCommentForAppsScript,
+        feedback: formattedCommentForAppsScript,
+        compliments: formattedCommentForAppsScript,
+        rawComment: cleanRawUserComment || "No written feedback provided.",
+        userComment: cleanRawUserComment || "No written feedback provided.",
         guestName,
+        roomNumber,
         ratingId,
         submittedAt,
 
@@ -281,23 +649,53 @@ export async function dispatchRatingNotification(ratingInput: any): Promise<Noti
         location: "Marmaris / Icmeler, Turkey",
         subject,
 
-        // Detailed dimensions
+        // Primary rating with first stars
         overallRating: overall,
         overallExperience: overall,
-        stars,
-        hospitality: rating.hospitalityRating ?? rating.hospitality ?? overall,
-        hospitalityRating: rating.hospitalityRating ?? overall,
-        professionalism: rating.professionalismRating ?? rating.professionalism ?? overall,
-        professionalismRating: rating.professionalismRating ?? overall,
-        helpfulness: rating.helpfulnessRating ?? rating.helpfulness ?? overall,
-        helpfulnessRating: rating.helpfulnessRating ?? overall,
-        courtesy: rating.courtesyRating ?? rating.courtesy ?? overall,
-        courtesyRating: rating.courtesyRating ?? overall,
-        quality: rating.qualityRating ?? rating.quality ?? overall,
-        qualityRating: rating.qualityRating ?? overall,
-        roomNumber,
+        stars: firstStars,
+        firstStars,
+
+        // Detailed culinary & services star ranking (secondary stars)
+        hasDetailedRatings: true,
+        detailedRatingsGiven: hasDetailed,
+        secondaryStars: secondaryStarsSummary,
+        secondaryStarsSummary,
+        detailedDimensions,
+        detailedDimensionsBlock,
+
+        // Rich HTML and plain text emails
+        htmlBody,
+        html: htmlBody,
+        body: textBody,
+        text: textBody,
+        message: textBody,
+
+        // Individual dimensions
+        overallExperienceRating: overall,
+        overallExperienceStars: renderEmojiStars(overall),
+        hospitality: hospScore,
+        hospitalityRating: hospScore,
+        hospitalityStars: hospStars,
+        hospitalityEmojiStars: renderEmojiStars(hospScore),
+        professionalism: profScore,
+        professionalismRating: profScore,
+        professionalismStars: profStars,
+        professionalismEmojiStars: renderEmojiStars(profScore),
+        helpfulness: helpScore,
+        helpfulnessRating: helpScore,
+        helpfulnessStars: helpStars,
+        helpfulnessEmojiStars: renderEmojiStars(helpScore),
+        courtesy: courtScore,
+        courtesyRating: courtScore,
+        courtesyStars: courtStars,
+        courtesyEmojiStars: renderEmojiStars(courtScore),
+        quality: qualScore,
+        qualityRating: qualScore,
+        qualityStars: qualStars,
+        qualityEmojiStars: renderEmojiStars(qualScore),
+
         anonymous: Boolean(rating.anonymous),
-        sectionName: rating.sectionName || "Hotel Experience",
+        sectionName,
         categoryName,
 
         // Metadata

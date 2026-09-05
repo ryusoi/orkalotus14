@@ -32,7 +32,12 @@ export interface RatingSubmissionInput {
   recommendation: "absolutely" | "yes" | "maybe" | "probably_not";
   comment?: string;
   guestDisplayName?: string;
+  guestName?: string;
+  roomNumber?: string;
   anonymous?: boolean;
+  hasDetailedRatings?: boolean;
+  detailedRatingsGiven?: boolean;
+  dimensionScores?: Record<string, number>;
 }
 
 export interface LiveSummary {
@@ -229,6 +234,62 @@ const NOTIFICATION_RECIPIENTS =
   "marmarisluxuryvillas@gmail.com,orkahomespro@gmail.com";
 
 /**
+ * Generates visual star string representation for ratings (e.g. ★★★★★).
+ */
+export function renderStarString(score: number): string {
+  const rounded = Math.min(5, Math.max(1, Math.round(score)));
+  return "★".repeat(rounded) + "☆".repeat(Math.max(0, 5 - rounded));
+}
+
+/**
+ * Generates bright emoji star string for ratings (e.g. ⭐⭐⭐).
+ */
+export function renderEmojiStars(score: number): string {
+  const rounded = Math.min(5, Math.max(1, Math.round(score)));
+  return "⭐".repeat(rounded);
+}
+
+/**
+ * Builds the comprehensive visual text block for detailed culinary & service dimensions with stars.
+ */
+export function buildDetailedDimensionsTextBlock(options: {
+  overallScore: number;
+  hospScore: number;
+  profScore: number;
+  helpScore: number;
+  courtScore: number;
+  qualScore: number;
+  qualityLabel?: string;
+  hasDetailed?: boolean;
+}): string {
+  const {
+    overallScore,
+    hospScore,
+    profScore,
+    helpScore,
+    courtScore,
+    qualScore,
+    qualityLabel = "Culinary & Service Quality",
+    hasDetailed = false,
+  } = options;
+
+  return [
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "⭐ DETAILED EXPERIENCE & SERVICE DIMENSIONS ⭐",
+    hasDetailed
+      ? "(✓ Rated individually with secondary stars by guest)"
+      : "(• Service & experience criteria in harmony with main rating)",
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    `⭐ Overall Experience: ${renderEmojiStars(overallScore)} (${overallScore.toFixed(1)} / 5.0)`,
+    `⭐ Hospitality & Warmth: ${renderEmojiStars(hospScore)} (${hospScore.toFixed(1)} / 5.0)`,
+    `⭐ Professionalism & Competence: ${renderEmojiStars(profScore)} (${profScore.toFixed(1)} / 5.0)`,
+    `⭐ Helpfulness & Speed: ${renderEmojiStars(helpScore)} (${helpScore.toFixed(1)} / 5.0)`,
+    `⭐ Courtesy & Respect: ${renderEmojiStars(courtScore)} (${courtScore.toFixed(1)} / 5.0)`,
+    `⭐ ${qualityLabel}: ${renderEmojiStars(qualScore)} (${qualScore.toFixed(1)} / 5.0)`,
+  ].join("\n");
+}
+
+/**
  * Direct client-to-Apps-Script dispatch fallback.
  * Uses text/plain simple CORS request so that browsers can send the notification directly
  * to Google Apps Script even if Vercel Serverless Functions fail or return 404.
@@ -237,13 +298,13 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
   try {
     const ratingId = String(rating?.id || rating?.ratingId || `rating_${Date.now()}`);
     const overall = Number(rating?.overallRating ?? rating?.rating ?? 5);
-    const stars = "★".repeat(Math.max(1, Math.min(5, Math.round(overall))));
+    const firstStars = renderStarString(overall);
     const targetName = rating?.targetName || rating?.targetId || "Hotel Experience";
     const categoryName = rating?.categoryName || rating?.category || "General Service";
     const guestName = rating?.guestName || rating?.guestDisplayName || (rating?.anonymous ? "Anonymous Guest" : "Guest");
-    const roomNumber = rating?.roomNumber ? `Room ${rating.roomNumber}` : "Room not specified";
+    const roomNumber = rating?.roomNumber && rating.roomNumber !== "Not specified" ? (rating.roomNumber.startsWith("Room") ? rating.roomNumber : `Room ${rating.roomNumber}`) : (rating?.roomNumber || "Not specified");
     const recommendation = rating?.recommendation || "yes";
-    const comment = rating?.comment || "No written review provided.";
+    const hasDetailed = Boolean(rating?.hasDetailedRatings || rating?.detailedRatingsGiven);
     const now = new Date();
     const formattedDate = now.toLocaleDateString("en-GB", {
       day: "numeric",
@@ -251,8 +312,62 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+    }) + " (Marmaris)";
+    const subject = `[ORKA LOTUS] New Guest Ranking: ${targetName} • Overall ${overall.toFixed(1)}/5.0 ★`;
+
+    const hospScore = Number(rating?.hospitalityRating ?? overall);
+    const profScore = Number(rating?.professionalismRating ?? overall);
+    const helpScore = Number(rating?.helpfulnessRating ?? overall);
+    const courtScore = Number(rating?.courtesyRating ?? overall);
+    const qualScore = Number(rating?.qualityRating ?? overall);
+
+    const hospStars = renderStarString(hospScore);
+    const profStars = renderStarString(profScore);
+    const helpStars = renderStarString(helpScore);
+    const courtStars = renderStarString(courtScore);
+    const qualStars = renderStarString(qualScore);
+
+    const isCulinary =
+      categoryName === "Food & Beverage" ||
+      String(rating?.category || "").includes("food") ||
+      String(rating?.targetId || "").includes("food") ||
+      String(rating?.targetId || "").includes("bar") ||
+      String(rating?.targetId || "").includes("chef") ||
+      String(rating?.targetId || "").includes("restaurant");
+
+    const qualityLabel = isCulinary ? "Culinary & Service Quality" : "Service & Execution Quality";
+
+    const detailedDimensions = rating?.detailedDimensions || {
+      hospitality: { label: "Hospitality & Warmth", score: hospScore, stars: hospStars },
+      professionalism: { label: "Professionalism & Competence", score: profScore, stars: profStars },
+      helpfulness: { label: "Helpfulness & Speed", score: helpScore, stars: helpStars },
+      courtesy: { label: "Courtesy & Respect", score: courtScore, stars: courtStars },
+      quality: { label: qualityLabel, score: qualScore, stars: qualStars },
+    };
+
+    const secondaryStarsSummary = rating?.secondaryStarsSummary || (hasDetailed
+      ? `Hospitality: ${hospStars} (${hospScore.toFixed(1)}/5.0) • Professionalism: ${profStars} (${profScore.toFixed(1)}/5.0) • Helpfulness: ${helpStars} (${helpScore.toFixed(1)}/5.0) • Courtesy: ${courtStars} (${courtScore.toFixed(1)}/5.0) • ${qualityLabel}: ${qualStars} (${qualScore.toFixed(1)}/5.0)`
+      : "Primary overall rating provided (optional detailed culinary & service dimensions not rated)");
+
+    const detailedDimensionsBlock = buildDetailedDimensionsTextBlock({
+      overallScore: overall,
+      hospScore,
+      profScore,
+      helpScore,
+      courtScore,
+      qualScore,
+      qualityLabel,
+      hasDetailed,
     });
-    const subject = `[Guest Rating Alert] ${targetName} - ${overall} / 5 Stars ${stars}`;
+
+    const rawComment = String(rating?.rawComment || rating?.userComment || rating?.comment || rating?.feedback || rating?.compliments || "").trim();
+    const cleanRawComment = rawComment.includes("⭐ DETAILED EXPERIENCE & SERVICE DIMENSIONS ⭐")
+      ? rawComment.split("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")[0].trim()
+      : rawComment;
+
+    const comment = cleanRawComment && cleanRawComment !== "No written feedback provided."
+      ? `${cleanRawComment}\n\n${detailedDimensionsBlock}`
+      : detailedDimensionsBlock;
 
     const appsScriptPayload = {
       category: categoryName,
@@ -260,7 +375,12 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
       rating: overall,
       recommendation,
       comment,
+      feedback: comment,
+      compliments: comment,
+      rawComment: cleanRawComment || "No written feedback provided.",
+      userComment: cleanRawComment || "No written feedback provided.",
       guestName,
+      roomNumber,
       ratingId,
       submittedAt: now.toISOString(),
       recipient: NOTIFICATION_RECIPIENTS,
@@ -270,23 +390,46 @@ async function dispatchDirectToAppsScript(rating: Record<string, any>): Promise<
       hotelName: "ORKA LOTUS BEACH HOTEL",
       location: "Marmaris / Icmeler, Turkey",
       subject,
+
+      // Primary rating with first stars
       overallRating: overall,
       overallExperience: overall,
-      stars,
-      hospitality: rating?.hospitalityRating ?? rating?.hospitality ?? overall,
-      hospitalityRating: rating?.hospitalityRating ?? overall,
-      professionalism: rating?.professionalismRating ?? rating?.professionalism ?? overall,
-      professionalismRating: rating?.professionalismRating ?? overall,
-      helpfulness: rating?.helpfulnessRating ?? rating?.helpfulness ?? overall,
-      helpfulnessRating: rating?.helpfulnessRating ?? overall,
-      courtesy: rating?.courtesyRating ?? rating?.courtesy ?? overall,
-      courtesyRating: rating?.courtesyRating ?? overall,
-      quality: rating?.qualityRating ?? rating?.quality ?? overall,
-      qualityRating: rating?.qualityRating ?? overall,
-      roomNumber,
+      stars: firstStars,
+      firstStars,
+
+      // Detailed culinary & services star ranking (secondary stars)
+      hasDetailedRatings: true,
+      detailedRatingsGiven: hasDetailed,
+      secondaryStars: secondaryStarsSummary,
+      secondaryStarsSummary,
+      detailedDimensions,
+      detailedDimensionsBlock,
+
+      overallExperienceRating: overall,
+      overallExperienceStars: renderEmojiStars(overall),
+      hospitality: hospScore,
+      hospitalityRating: hospScore,
+      hospitalityStars: hospStars,
+      hospitalityEmojiStars: renderEmojiStars(hospScore),
+      professionalism: profScore,
+      professionalismRating: profScore,
+      professionalismStars: profStars,
+      professionalismEmojiStars: renderEmojiStars(profScore),
+      helpfulness: helpScore,
+      helpfulnessRating: helpScore,
+      helpfulnessStars: helpStars,
+      helpfulnessEmojiStars: renderEmojiStars(helpScore),
+      courtesy: courtScore,
+      courtesyRating: courtScore,
+      courtesyStars: courtStars,
+      courtesyEmojiStars: renderEmojiStars(courtScore),
+      quality: qualScore,
+      qualityRating: qualScore,
+      qualityStars: qualStars,
+      qualityEmojiStars: renderEmojiStars(qualScore),
+
       anonymous: Boolean(rating?.anonymous),
       sectionName: rating?.sectionName || "Hotel Experience",
-      categoryName,
       formattedDate,
       createdAt: now.toISOString(),
       ratingRecord: rating,
@@ -438,6 +581,122 @@ export async function submitGuestRating(
       ? "Executive Leadership"
       : "General Service";
 
+  const overall = Number(input.overallRating || 5);
+  const overallStars = renderStarString(overall);
+  const hasDetailed = Boolean(input.hasDetailedRatings);
+
+  const hospScore = Number(input.hospitalityRating ?? overall);
+  const profScore = Number(input.professionalismRating ?? overall);
+  const helpScore = Number(input.helpfulnessRating ?? overall);
+  const courtScore = Number(input.courtesyRating ?? overall);
+  const qualScore = Number(input.qualityRating ?? overall);
+
+  const hospStars = renderStarString(hospScore);
+  const profStars = renderStarString(profScore);
+  const helpStars = renderStarString(helpScore);
+  const courtStars = renderStarString(courtScore);
+  const qualStars = renderStarString(qualScore);
+
+  const isCulinary =
+    category === "culinary_fb" ||
+    input.targetId.includes("food") ||
+    input.targetId.includes("bar") ||
+    input.targetId.includes("chef") ||
+    input.targetId.includes("restaurant");
+
+  const qualityLabel = isCulinary ? "Culinary & Service Quality" : "Service & Execution Quality";
+
+  const detailedDimensions = {
+    hospitality: {
+      id: "hospitalityRating",
+      key: "hospitality",
+      label: "Hospitality & Warmth",
+      score: hospScore,
+      rating: hospScore,
+      stars: hospStars,
+      display: `${hospScore.toFixed(1)} / 5.0 ${hospStars}`,
+    },
+    professionalism: {
+      id: "professionalismRating",
+      key: "professionalism",
+      label: "Professionalism & Competence",
+      score: profScore,
+      rating: profScore,
+      stars: profStars,
+      display: `${profScore.toFixed(1)} / 5.0 ${profStars}`,
+    },
+    helpfulness: {
+      id: "helpfulnessRating",
+      key: "helpfulness",
+      label: "Helpfulness & Speed",
+      score: helpScore,
+      rating: helpScore,
+      stars: helpStars,
+      display: `${helpScore.toFixed(1)} / 5.0 ${helpStars}`,
+    },
+    courtesy: {
+      id: "courtesyRating",
+      key: "courtesy",
+      label: "Courtesy & Respect",
+      score: courtScore,
+      rating: courtScore,
+      stars: courtStars,
+      display: `${courtScore.toFixed(1)} / 5.0 ${courtStars}`,
+    },
+    quality: {
+      id: "qualityRating",
+      key: "quality",
+      label: qualityLabel,
+      score: qualScore,
+      rating: qualScore,
+      stars: qualStars,
+      display: `${qualScore.toFixed(1)} / 5.0 ${qualStars}`,
+    },
+  };
+
+  const secondaryStarsSummary = hasDetailed
+    ? `Hospitality: ${hospStars} (${hospScore.toFixed(1)}/5.0) • Professionalism: ${profStars} (${profScore.toFixed(1)}/5.0) • Helpfulness: ${helpStars} (${helpScore.toFixed(1)}/5.0) • Courtesy: ${courtStars} (${courtScore.toFixed(1)}/5.0) • ${qualityLabel}: ${qualStars} (${qualScore.toFixed(1)}/5.0)`
+    : "Primary overall rating provided (optional detailed culinary & service dimensions not rated)";
+
+  // Parse guest name and room number cleanly
+  let parsedGuestName = input.guestName?.trim() || cleanDisplayName;
+  let parsedRoomNumber = input.roomNumber?.trim() || "";
+
+  if (!parsedRoomNumber && cleanDisplayName) {
+    const roomMatch =
+      cleanDisplayName.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i) ||
+      cleanDisplayName.match(/\b([0-9]{3,4}[a-zA-Z]?)\b/);
+    if (roomMatch) {
+      parsedRoomNumber = roomMatch[1];
+      const stripped = cleanDisplayName
+        .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
+        .replace(new RegExp(`\\b${roomMatch[1]}\\b`, "g"), "")
+        .replace(/^[\s\-–—,./|:]+|[\s\-–—,./|:]+$/g, "")
+        .trim();
+      if (stripped) {
+        parsedGuestName = stripped;
+      }
+    }
+  }
+
+  if (!parsedGuestName || parsedGuestName === "Verified Guest") {
+    parsedGuestName = input.anonymous ? "Anonymous Guest" : "Verified Guest";
+  }
+  if (!parsedRoomNumber) {
+    parsedRoomNumber = "Not specified";
+  }
+
+  const detailedDimensionsBlock = buildDetailedDimensionsTextBlock({
+    overallScore: overall,
+    hospScore,
+    profScore,
+    helpScore,
+    courtScore,
+    qualScore,
+    qualityLabel,
+    hasDetailed,
+  });
+
   const ratingRecord = {
     id: ratingId,
     targetId: input.targetId,
@@ -447,16 +706,53 @@ export async function submitGuestRating(
     sectionName,
     category,
     categoryName,
-    overallRating: Number(input.overallRating),
-    hospitalityRating: Number(input.hospitalityRating),
-    professionalismRating: Number(input.professionalismRating),
-    helpfulnessRating: Number(input.helpfulnessRating),
-    courtesyRating: Number(input.courtesyRating),
-    qualityRating: Number(input.qualityRating),
+
+    // Primary main rating (first stars)
+    overallRating: overall,
+    overallStars,
+    firstStars: overallStars,
+    stars: overallStars,
+    overallEmojiStars: renderEmojiStars(overall),
+    overallExperienceRating: overall,
+    overallExperienceStars: renderEmojiStars(overall),
+
+    // Detailed culinary & services star ranking (secondary stars)
+    hasDetailedRatings: true,
+    detailedRatingsGiven: hasDetailed,
+    detailedDimensions,
+    secondaryStarsSummary,
+    detailedDimensionsBlock,
+
+    // Individual dimension star rankings
+    hospitalityRating: hospScore,
+    hospitalityStars: hospStars,
+    hospitalityEmojiStars: renderEmojiStars(hospScore),
+    professionalismRating: profScore,
+    professionalismStars: profStars,
+    professionalismEmojiStars: renderEmojiStars(profScore),
+    helpfulnessRating: helpScore,
+    helpfulnessStars: helpStars,
+    helpfulnessEmojiStars: renderEmojiStars(helpScore),
+    courtesyRating: courtScore,
+    courtesyStars: courtStars,
+    courtesyEmojiStars: renderEmojiStars(courtScore),
+    qualityRating: qualScore,
+    qualityStars: qualStars,
+    qualityEmojiStars: renderEmojiStars(qualScore),
+
+    // Feedback, compliments & guest details
     recommendation: input.recommendation,
-    comment: cleanComment,
+    rawComment: cleanComment,
+    userComment: cleanComment,
+    comment: cleanComment ? `${cleanComment}\n\n${detailedDimensionsBlock}` : detailedDimensionsBlock,
+    feedback: cleanComment ? `${cleanComment}\n\n${detailedDimensionsBlock}` : detailedDimensionsBlock,
+    compliments: cleanComment ? `${cleanComment}\n\n${detailedDimensionsBlock}` : detailedDimensionsBlock,
+    guestName: parsedGuestName,
+    roomNumber: parsedRoomNumber,
     guestDisplayName: cleanDisplayName,
     anonymous: Boolean(input.anonymous),
+
+    // Session & timestamp
     submissionSessionId: sessionId,
     createdAt: nowIso,
     timestamp: nowTimestamp,

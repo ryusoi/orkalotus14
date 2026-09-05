@@ -310,6 +310,38 @@ export const OrkaRatingModal: React.FC<OrkaRatingModalProps> = ({
     setRecentWarning(false);
 
     try {
+      // Parse guest name and room number cleanly from input
+      const rawName = guestName.trim();
+      let parsedGuestName = rawName || "Verified Guest";
+      let parsedRoomNumber = "";
+
+      if (rawName) {
+        const roomMatch =
+          rawName.match(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*([a-zA-Z0-9-]+)/i) ||
+          rawName.match(/\b([0-9]{3,4}[a-zA-Z]?)\b/);
+        if (roomMatch) {
+          parsedRoomNumber = roomMatch[1];
+          const stripped = rawName
+            .replace(/(?:room|oda|rm|номер|no|nr|zimm?er)\s*[:#-]?\s*[a-zA-Z0-9-]+/gi, "")
+            .replace(new RegExp(`\\b${roomMatch[1]}\\b`, "g"), "")
+            .replace(/^[\s\-–—,./|:]+|[\s\-–—,./|:]+$/g, "")
+            .trim();
+          if (stripped) {
+            parsedGuestName = stripped;
+          }
+        }
+      }
+
+      // Always compute and guarantee all 6 dimensions (Overall, Hospitality, Professionalism, Helpfulness, Courtesy, Quality)
+      const hasDetailedScoresTouched = showDetailed || Object.values(dimensionScores).some((score) => score !== overallRating);
+      const effectiveDetailedScores = {
+        hospitalityRating: dimensionScores.hospitalityRating || overallRating,
+        professionalismRating: dimensionScores.professionalismRating || overallRating,
+        helpfulnessRating: dimensionScores.helpfulnessRating || overallRating,
+        courtesyRating: dimensionScores.courtesyRating || overallRating,
+        qualityRating: dimensionScores.qualityRating || overallRating,
+      };
+
       // Fast, tactile 200ms animation so user sees "Submitting..." state smoothly without delay
       const [response] = await Promise.all([
         submitGuestRating({
@@ -317,15 +349,20 @@ export const OrkaRatingModal: React.FC<OrkaRatingModalProps> = ({
           targetType: currentTarget.type,
           targetName: currentTarget.title[locale] || currentTarget.title.en,
           overallRating,
-          hospitalityRating: showDetailed ? dimensionScores.hospitalityRating : overallRating,
-          professionalismRating: showDetailed ? dimensionScores.professionalismRating : overallRating,
-          helpfulnessRating: showDetailed ? dimensionScores.helpfulnessRating : overallRating,
-          courtesyRating: showDetailed ? dimensionScores.courtesyRating : overallRating,
-          qualityRating: showDetailed ? dimensionScores.qualityRating : overallRating,
+          hospitalityRating: effectiveDetailedScores.hospitalityRating,
+          professionalismRating: effectiveDetailedScores.professionalismRating,
+          helpfulnessRating: effectiveDetailedScores.helpfulnessRating,
+          courtesyRating: effectiveDetailedScores.courtesyRating,
+          qualityRating: effectiveDetailedScores.qualityRating,
+          hasDetailedRatings: true,
+          detailedRatingsGiven: hasDetailedScoresTouched,
+          dimensionScores: effectiveDetailedScores,
           recommendation,
           comment: comment.trim(),
-          guestDisplayName: guestName.trim() || "Verified Guest",
-          anonymous: !guestName.trim(),
+          guestDisplayName: rawName || "Verified Guest",
+          guestName: parsedGuestName,
+          roomNumber: parsedRoomNumber,
+          anonymous: !rawName,
         }),
         new Promise((resolve) => setTimeout(resolve, 200)),
       ]);
